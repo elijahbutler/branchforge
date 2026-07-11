@@ -49,7 +49,7 @@ finish.
 
 ### R3 — Install confidence
 
-- Add `branchforge doctor --host codex|claude|claude-desktop`.
+- Add `branchforge doctor --host local|codex|claude|claude-desktop`.
 - Diagnose Python/runtime import, MCP stdio startup, skill installation, host CLI availability, configured command path, duplicate Claude scopes, Desktop config shape, and marketplace/PATH readiness.
 - Back the doctor with fake-host and temporary-config tests.
 

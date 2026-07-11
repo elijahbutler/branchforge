@@ -493,12 +493,14 @@ Additional storage commands:
 
 ```bash
 branchforge runs
+branchforge doctor --host local
+branchforge doctor --host codex
 branchforge status RUN_ID
 branchforge tree RUN_ID
 branchforge dossier RUN_ID
 ```
 
-`status` prints run progress, blockers, next actions, and finish readiness as JSON. `tree` reconstructs parent-child lineage from SQLite. `dossier` refreshes the portable files and prints their run directory.
+`doctor` runs non-mutating installation diagnostics as JSON. `status` prints run progress, blockers, next actions, and finish readiness as JSON. `tree` reconstructs parent-child lineage from SQLite. `dossier` refreshes the portable files and prints their run directory.
 
 ## Python API
 

@@ -6,6 +6,7 @@ import json
 from dataclasses import asdict
 from pathlib import Path
 
+from .doctor import HOSTS, run_doctor
 from .models import BranchMode, RunConfig, StageSpec
 from .orchestrator import BranchForge
 from .providers import provider_from_name
@@ -37,12 +38,19 @@ def parser() -> argparse.ArgumentParser:
     tree.add_argument("run_id", nargs="?")
     dossier = commands.add_parser("dossier", help="Render portable dossiers for a run")
     dossier.add_argument("run_id", nargs="?")
+    doctor = commands.add_parser("doctor", help="Run non-mutating installation diagnostics")
+    doctor.add_argument("--host", choices=sorted(HOSTS), default="local")
     commands.add_parser("runs", help="List recorded run IDs")
     commands.add_parser("mcp", help="Run the agent-native MCP server over stdio")
     return root
 
 
 async def execute(args: argparse.Namespace) -> int:
+    if args.command == "doctor":
+        result = run_doctor(args.host)
+        print(json.dumps(result, indent=2))
+        return 0 if result["ok"] else 1
+
     store = EventStore(args.db)
     repository = BranchRepository(store, args.workspace)
     try:
