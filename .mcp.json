@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "branchforge": {
-      "command": "branchforge",
-      "args": ["mcp"]
-    }
-  }
-}

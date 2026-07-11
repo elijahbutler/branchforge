@@ -25,7 +25,9 @@ venv="$repo_root/.venv"
 if [[ ! -x "$venv/bin/python" ]]; then
   python3 -m venv "$venv"
 fi
-"$venv/bin/python" -m pip install -e "$repo_root[mcp]"
+# Install a real wheel into the runtime environment. Editable installs can
+# produce hidden .pth files on macOS/Python 3.14 that Python intentionally skips.
+"$venv/bin/python" -m pip install --upgrade --force-reinstall "$repo_root[mcp]"
 
 skill_args=("--$platform")
 if [[ "$force" == "true" ]]; then
@@ -34,6 +36,10 @@ fi
 "$repo_root/scripts/install-skill.sh" "${skill_args[@]}"
 
 server="$venv/bin/branchforge"
+if ! "$server" --help >/dev/null; then
+  echo "BranchForge backend failed its post-install import check" >&2
+  exit 1
+fi
 
 install_codex() {
   command -v codex >/dev/null || { echo "codex is not installed" >&2; return 1; }

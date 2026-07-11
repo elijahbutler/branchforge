@@ -188,6 +188,31 @@ architectures. Preserve every branch and ask before consequential actions.
 
 The active Codex or Claude model performs reasoning and spawns native subagents. No OpenAI or Anthropic API key is required for agent-native mode.
 
+### Claude troubleshooting
+
+Start a new Claude Code session after installation; an already-running session may not discover newly installed MCP tools or top-level skill directories.
+
+Check the server directly:
+
+```bash
+claude mcp get branchforge
+```
+
+It must report `Status: ✔ Connected`. If it reports `Failed to connect`, update the checkout and rerun the installer:
+
+```bash
+git pull
+./scripts/install-agent.sh --claude --force
+```
+
+Then check for duplicate definitions:
+
+```bash
+claude mcp list
+```
+
+There should be no `Conflicting scopes` warning for `branchforge`. The recommended installation has one user-scoped endpoint pointing to the checkout’s absolute `.venv/bin/branchforge mcp` command.
+
 ## Manual agent-native installation
 
 Use these steps if you do not want the installer to change agent configuration.
@@ -195,7 +220,7 @@ Use these steps if you do not want the installer to change agent configuration.
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install -e ".[mcp]"
+python -m pip install --upgrade --force-reinstall ".[mcp]"
 ```
 
 Install the complete skill suite:

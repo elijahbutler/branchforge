@@ -59,9 +59,15 @@ class SkillPackageTests(unittest.TestCase):
         self.assertTrue(any(plugin["name"] == "branchforge" for plugin in marketplace["plugins"]))
         claude = json.loads((ROOT / ".claude-plugin" / "plugin.json").read_text())
         self.assertEqual(claude["name"], "branchforge")
-        for path in (ROOT / ".mcp.json", ROOT / "plugins" / "branchforge" / ".mcp.json"):
-            config = json.loads(path.read_text())
-            self.assertIn("branchforge", config["mcpServers"])
+        config = json.loads((ROOT / "plugins" / "branchforge" / ".mcp.json").read_text())
+        self.assertIn("branchforge", config["mcpServers"])
+
+    def test_agent_installer_avoids_broken_editable_runtime_and_scope_conflict(self):
+        installer = (ROOT / "scripts" / "install-agent.sh").read_text()
+        self.assertNotIn("pip install -e", installer)
+        self.assertIn("--force-reinstall", installer)
+        self.assertIn('"$server" --help', installer)
+        self.assertFalse((ROOT / ".mcp.json").exists())
 
     def test_skill_has_trigger_and_non_trigger_evaluations(self):
         data = json.loads((SKILL / "evals" / "evals.json").read_text())
