@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="360" viewBox="0 0 1200 360" role="img" aria-labelledby="title desc">
+  <title id="title">BranchForge adaptive deliberation banner</title>
+  <desc id="desc">A branching search diagram that converges through verification into a committed decision record.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#101828"/>
+      <stop offset="0.55" stop-color="#172554"/>
+      <stop offset="1" stop-color="#064e3b"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#facc15"/>
+      <stop offset="1" stop-color="#fb923c"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="10" stdDeviation="16" flood-color="#020617" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+  <rect width="1200" height="360" rx="0" fill="url(#bg)"/>
+  <path d="M0 292 C170 248 260 328 430 284 C600 240 690 272 850 230 C1010 188 1110 214 1200 176 L1200 360 L0 360 Z" fill="#0f766e" opacity="0.22"/>
+  <path d="M0 70 C160 112 276 42 420 86 C580 135 692 62 858 96 C1018 129 1098 80 1200 102" fill="none" stroke="#38bdf8" stroke-width="2" opacity="0.28"/>
+
+  <g transform="translate(90 70)">
+    <text x="0" y="0" fill="#e2e8f0" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="28" font-weight="700" letter-spacing="0">BranchForge</text>
+    <text x="0" y="58" fill="#ffffff" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="52" font-weight="800" letter-spacing="0">Branch difficult decisions.</text>
+    <text x="0" y="112" fill="#ffffff" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="52" font-weight="800" letter-spacing="0">Collapse with evidence.</text>
+    <text x="0" y="166" fill="#cbd5e1" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="22" font-weight="500" letter-spacing="0">Durable branch graphs, independent exploration, verified outcomes, and replayable dossiers for agent-native work.</text>
+  </g>
+
+  <g transform="translate(770 72)" filter="url(#shadow)">
+    <rect x="0" y="0" width="330" height="220" rx="18" fill="#f8fafc" opacity="0.96"/>
+    <circle cx="52" cy="110" r="16" fill="#0f172a"/>
+    <circle cx="150" cy="54" r="16" fill="#2563eb"/>
+    <circle cx="150" cy="110" r="16" fill="#0891b2"/>
+    <circle cx="150" cy="166" r="16" fill="#16a34a"/>
+    <circle cx="260" cy="110" r="18" fill="url(#gold)"/>
+    <path d="M68 110 L134 54 M68 110 L134 110 M68 110 L134 166 M166 54 C205 54 220 80 242 100 M166 110 L242 110 M166 166 C205 166 220 140 242 120" fill="none" stroke="#334155" stroke-width="4" stroke-linecap="round"/>
+    <text x="36" y="36" fill="#0f172a" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="13" font-weight="700">goal</text>
+    <text x="116" y="28" fill="#0f172a" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="13" font-weight="700">branches</text>
+    <text x="218" y="84" fill="#0f172a" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="13" font-weight="700">verified</text>
+    <text x="214" y="145" fill="#0f172a" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="13" font-weight="700">commit</text>
+    <rect x="34" y="190" width="262" height="10" rx="5" fill="#e2e8f0"/>
+    <rect x="34" y="190" width="188" height="10" rx="5" fill="#14b8a6"/>
+  </g>
+</svg>

@@ -1,5 +1,9 @@
 # BranchForge
 
+<p align="center">
+  <img src="docs/assets/branchforge-banner.svg" alt="BranchForge: branch difficult decisions, collapse with evidence">
+</p>
+
 BranchForge is an adaptive deliberation system for difficult decisions. It explores a bounded set of materially different hypotheses, develops them independently, verifies their claims, audits their decisive disagreements, and collapses the search into a committed stage result.
 
 The repository provides two complementary modes:
@@ -29,6 +33,12 @@ The central principle is:
 > Spend parallel computation only where uncertainty and consequence justify competing exploration. Collapse using evidence, while preserving enough diversity and memory to recover from a mistaken judgment.
 
 ## How it works
+
+<p align="center">
+  <img src="docs/assets/branchforge-lifecycle.svg" alt="BranchForge lifecycle: frame, branch, explore, verify, and commit">
+</p>
+
+### Detailed flow
 
 ```mermaid
 flowchart TD
