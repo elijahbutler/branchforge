@@ -1,0 +1,4 @@
+interface:
+  display_name: "BranchForge"
+  short_description: "Run durable branching deliberation natively"
+  default_prompt: "Use $branchforge to explore competing approaches with durable evidence and branch dossiers."

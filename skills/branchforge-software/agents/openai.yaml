@@ -1,0 +1,4 @@
+interface:
+  display_name: "BranchForge Software"
+  short_description: "Explore competing software implementations"
+  default_prompt: "Use $branchforge-software to explore and verify competing software implementations."

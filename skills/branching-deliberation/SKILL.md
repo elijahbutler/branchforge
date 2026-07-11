@@ -1,6 +1,6 @@
 ---
 name: branching-deliberation
-description: Explores consequential decisions through bounded, competing agent branches, independent verification, divergence auditing, pairwise judgment, and staged convergence. Use for complex architecture, implementation, research, debugging, planning, or optimization tasks where several materially different approaches are plausible and choosing incorrectly would be costly. Do not use for routine, low-impact, easily reversible work with an obvious solution.
+description: Instruction-only fallback for bounded branching deliberation when the BranchForge MCP tools are unavailable. Use only when the user explicitly requests a tool-free workflow or cannot install the agent-native branchforge plugin; prefer the branchforge skill for durable native-agent runs.
 ---
 
 # Branching Deliberation

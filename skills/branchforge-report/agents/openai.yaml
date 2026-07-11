@@ -1,0 +1,4 @@
+interface:
+  display_name: "BranchForge Report"
+  short_description: "Render branch dossiers and decisions"
+  default_prompt: "Use $branchforge-report to render the durable tree, dossiers, and decision record."

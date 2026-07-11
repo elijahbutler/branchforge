@@ -1,0 +1,4 @@
+interface:
+  display_name: "BranchForge Research"
+  short_description: "Investigate competing research hypotheses"
+  default_prompt: "Use $branchforge-research to investigate and document competing research hypotheses."

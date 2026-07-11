@@ -23,33 +23,36 @@ while [[ $# -gt 0 ]]; do
 done
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-source_dir="$repo_root/skills/branching-deliberation"
 
-install_one() {
+install_suite() {
   local target_root="$1"
-  local target="$target_root/branching-deliberation"
   mkdir -p "$target_root"
-  if [[ -e "$target" || -L "$target" ]]; then
-    if [[ "$force" != "true" ]]; then
-      echo "Refusing to replace existing skill: $target" >&2
-      echo "Re-run with --force if replacement is intended." >&2
-      return 1
+  local source_dir target
+  for source_dir in "$repo_root"/skills/branchforge "$repo_root"/skills/branchforge-* "$repo_root"/skills/branching-deliberation; do
+    [[ -d "$source_dir" ]] || continue
+    target="$target_root/$(basename "$source_dir")"
+    if [[ -e "$target" || -L "$target" ]]; then
+      if [[ "$force" != "true" ]]; then
+        echo "Refusing to replace existing skill: $target" >&2
+        echo "Re-run with --force if replacement is intended." >&2
+        return 1
+      fi
+      rm -rf "$target"
     fi
-    rm -rf "$target"
-  fi
-  if [[ "$mode" == "copy" ]]; then
-    cp -R "$source_dir" "$target"
-  else
-    ln -s "$source_dir" "$target"
-  fi
-  echo "Installed $target"
+    if [[ "$mode" == "copy" ]]; then
+      cp -R "$source_dir" "$target"
+    else
+      ln -s "$source_dir" "$target"
+    fi
+    echo "Installed $target"
+  done
 }
 
 case "$platform" in
-  codex) install_one "$HOME/.agents/skills" ;;
-  claude) install_one "$HOME/.claude/skills" ;;
+  codex) install_suite "$HOME/.agents/skills" ;;
+  claude) install_suite "$HOME/.claude/skills" ;;
   all)
-    install_one "$HOME/.agents/skills"
-    install_one "$HOME/.claude/skills"
+    install_suite "$HOME/.agents/skills"
+    install_suite "$HOME/.claude/skills"
     ;;
 esac

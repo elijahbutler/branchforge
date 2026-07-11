@@ -95,6 +95,12 @@ class BranchRepositoryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Parent branch does not exist"):
             self.repository.create_branch(self.run_id, "architecture", hypothesis, BranchMode.HYBRID)
 
+    def test_transition_rejects_wrong_run_id(self):
+        hypothesis = self.hypothesis()
+        self.repository.create_branch(self.run_id, "architecture", hypothesis, BranchMode.HYBRID)
+        with self.assertRaisesRegex(ValueError, "different run"):
+            self.repository.transition("run_wrong", hypothesis.id, BranchStatus.ADMITTED)
+
     def test_artifacts_are_content_addressed_and_deduplicated(self):
         hypothesis = self.hypothesis()
         self.repository.create_branch(self.run_id, "architecture", hypothesis, BranchMode.HYBRID)

@@ -1,0 +1,4 @@
+interface:
+  display_name: "BranchForge Evaluate"
+  short_description: "Verify and judge competing branches"
+  default_prompt: "Use $branchforge-evaluate to verify evidence and select among competing branches."

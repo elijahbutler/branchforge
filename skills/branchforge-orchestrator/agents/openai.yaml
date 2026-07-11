@@ -1,0 +1,4 @@
+interface:
+  display_name: "BranchForge Orchestrator"
+  short_description: "Coordinate stages, branches, and native agents"
+  default_prompt: "Use $branchforge-orchestrator to coordinate a durable multi-stage branching run."

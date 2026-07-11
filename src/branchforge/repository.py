@@ -261,6 +261,8 @@ class BranchRepository:
         branch = self.get_branch(branch_id)
         if branch is None:
             raise KeyError(f"Unknown branch: {branch_id}")
+        if branch["run_id"] != run_id:
+            raise ValueError("Branch belongs to a different run")
         current = BranchStatus(branch["status"])
         if status == current:
             return
@@ -417,10 +419,19 @@ class BranchRepository:
         _atomic_text(run_dir / "TREE.json", json.dumps(tree, indent=2, ensure_ascii=False))
         for branch in self.branches(run_id):
             self.render_branch(branch["branch_id"])
-        committed = [item for item in self.branches(run_id) if item["status"] == BranchStatus.COMMITTED.value]
         lines = [f"# Decision record: {run_id}", "", "## Goal", "", run["goal"], ""]
-        for item in committed:
-            lines.extend([f"## {item['stage']}: {item['title']}", "", item.get("proposal") or "", ""])
+        branches_by_id = {item["branch_id"]: item for item in self.branches(run_id)}
+        for stage in stages:
+            if not stage.get("winner_id"):
+                continue
+            item = branches_by_id.get(stage["winner_id"])
+            if item is None:
+                continue
+            lines.extend([
+                f"## {stage['name']}: {item['title']}", "",
+                item.get("proposal") or "", "", "### Rationale", "",
+                stage.get("rationale") or "", "",
+            ])
         _atomic_text(run_dir / "DECISION.md", "\n".join(lines))
         return run_dir
 

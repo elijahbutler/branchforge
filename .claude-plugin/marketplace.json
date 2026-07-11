@@ -1,0 +1,15 @@
+{
+  "name": "branchforge",
+  "description": "Agent-native branching deliberation skills and durable MCP tools.",
+  "owner": {
+    "name": "Elijah Butler",
+    "url": "https://github.com/elijahbutler"
+  },
+  "plugins": [
+    {
+      "name": "branchforge",
+      "source": "./",
+      "description": "Run durable branching deliberation inside Claude Code with native agents and deterministic MCP tools."
+    }
+  ]
+}

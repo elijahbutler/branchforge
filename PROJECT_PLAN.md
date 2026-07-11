@@ -21,10 +21,13 @@ BranchForge spends parallel model inference only at consequential, uncertain dec
 - Portable branch dossiers and reconstructed tree exports
 - OpenAI, Anthropic, and deterministic mock providers
 - CLI event, tree, dossier, and run inspection plus Python API
+- Deterministic agent-native MCP server with lifecycle, evidence, artifact, and dossier tools
+- Codex and Claude skill suites with phase-specific orchestration instructions
+- Codex and Claude plugin manifests plus local installers
 
 ## Deliberately out of scope for v0.1
 
-- Arbitrary tool execution by branches
+- Arbitrary tool execution by the headless Python kernel
 - Filesystem/container sandbox provisioning
 - Human approval checkpoints
 - Learned branch policy or Monte Carlo value estimates
@@ -33,7 +36,7 @@ BranchForge spends parallel model inference only at consequential, uncertain dec
 - Semantic similarity embeddings for branch deduplication
 - Provider retry, rate-limit, and billing controls
 
-These are excluded because safe execution boundaries and reliable evaluation should precede autonomous tool use.
+In agent-native mode, Codex or Claude executes work through its own tools and approval boundary. BranchForge records that work but does not bypass or replace host safety controls.
 
 ## Milestones
 

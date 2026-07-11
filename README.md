@@ -2,14 +2,14 @@
 
 BranchForge is an adaptive deliberation system for difficult decisions. It explores a bounded set of materially different hypotheses, develops them independently, verifies their claims, audits their decisive disagreements, and collapses the search into a committed stage result.
 
-The repository provides two complementary ways to use the approach:
+The repository provides two complementary modes:
 
-1. **Agent Skill** — a portable `SKILL.md` workflow that teaches Codex, Claude Code, and other Agent Skills-compatible hosts to orchestrate native subagents as a controlled search tree.
-2. **Python search kernel** — a provider-agnostic runtime that performs multi-round branching, persists a queryable branch graph in SQLite, stores immutable artifacts by content hash, and renders portable branch dossiers.
+1. **Agent-native mode (recommended)** — Codex or Claude performs all reasoning and native subagent work. BranchForge skills define the workflow, while MCP tools persist the branch graph, evidence, artifacts, and dossiers.
+2. **Headless provider mode** — the Python kernel calls configured model APIs directly for automation outside an agent host.
 
 BranchForge is inspired by beam search, Monte Carlo tree search, evolutionary selection, reasoning-tree auditing, actor–critic systems, and tournament-of-ideas architectures. The “quantum” analogy is conceptual: competing computational trajectories coexist until evidence justifies a collapse. BranchForge is not a quantum computing implementation.
 
-> **Project status:** experimental v0.1. The skill is usable now for native agent orchestration. The Python kernel supports deliberation over text proposals but does not yet give branches arbitrary shell, network, or filesystem tools.
+> **Project status:** experimental v0.1. Agent-native orchestration, deterministic MCP tools, durable branch storage, and the portable skill suite are implemented. Isolated software worktrees and objective evaluator plugins remain planned.
 
 ## Why BranchForge?
 
@@ -81,94 +81,183 @@ Candidates are compared at their decisive disagreements. The system may commit a
 
 ```text
 branchforge/
-├── .agents/skills/branching-deliberation -> ../../skills/branching-deliberation
-├── .claude/skills/branching-deliberation -> ../../skills/branching-deliberation
-├── skills/branching-deliberation/
-│   ├── SKILL.md
-│   ├── agents/openai.yaml
-│   ├── evals/evals.json
-│   └── references/
-│       ├── branch-contracts.md
-│       ├── evaluation.md
-│       └── search-policy.md
+├── .claude-plugin/          # Claude marketplace and plugin manifests
+├── .agents/plugins/         # Codex marketplace manifest
+├── plugins/branchforge/     # Codex plugin manifest and MCP config
+├── skills/
+│   ├── branchforge/         # Public agent-native entrypoint
+│   ├── branchforge-orchestrator/
+│   ├── branchforge-research/
+│   ├── branchforge-ideation/
+│   ├── branchforge-software/
+│   ├── branchforge-evaluate/
+│   ├── branchforge-report/
+│   └── branching-deliberation/ # Instruction-only fallback
 ├── src/branchforge/
 │   ├── cli.py
+│   ├── mcp_server.py
 │   ├── models.py
+│   ├── native.py
 │   ├── orchestrator.py
 │   ├── policy.py
 │   ├── providers.py
 │   ├── repository.py
 │   └── store.py
+├── scripts/install-agent.sh
 ├── scripts/install-skill.sh
-├── tests/test_branchforge.py
+├── tests/
 └── PROJECT_PLAN.md
 ```
 
-The canonical skill lives once under `skills/`. Repository-scoped links expose the same files to Codex and Claude Code without maintaining duplicate copies.
+The host model thinks; BranchForge stores, validates lifecycle transitions, and renders evidence. The MCP server never calls an LLM.
 
-## Install the Agent Skill
+## Agent-native quick start
 
-The skill follows the open [Agent Skills specification](https://agentskills.io). Both [Codex skills](https://developers.openai.com/codex/skills) and [Claude Code skills](https://code.claude.com/docs/en/skills) use a `SKILL.md` directory with progressively loaded resources.
+Requirements:
 
-### Repository-scoped use
+- Python 3.11+
+- Git
+- Codex, Claude Code, or both
 
-Clone the repository and open it in Codex or Claude Code. The checked-in discovery links make the skill available automatically:
+Clone the repository:
 
-- Codex: `.agents/skills/branching-deliberation`
-- Claude Code: `.claude/skills/branching-deliberation`
+```bash
+git clone https://github.com/elijahbutler/branchforge.git
+cd branchforge
+```
 
-Codex can invoke it explicitly as `$branching-deliberation`. Claude Code exposes it as `/branching-deliberation`. Both may also activate it automatically when a request matches the skill description.
+Install for both hosts:
 
-Example prompt:
+```bash
+./scripts/install-agent.sh --all --force
+```
+
+Or install for one:
+
+```bash
+./scripts/install-agent.sh --codex --force
+./scripts/install-agent.sh --claude --force
+```
+
+The installer:
+
+1. Creates `.venv` in the checkout.
+2. Installs BranchForge with the MCP dependency.
+3. Installs all agent-native phase skills.
+4. Registers the MCP server using the absolute `.venv/bin/branchforge` path.
+
+Restart the agent host or open a new task after installation.
+
+### Verify installation
+
+Codex:
+
+```bash
+codex mcp get branchforge
+```
+
+Claude Code:
+
+```bash
+claude mcp get branchforge
+```
+
+The configured command should end with:
 
 ```text
-Use branching deliberation to choose the architecture for an auditable payment
-reconciliation service. Explore genuinely competing approaches, test the key
-assumptions, and commit only after auditing the decisive disagreement.
+.venv/bin/branchforge mcp
 ```
 
-### Personal installation
+### Invoke natively
 
-Install for both Codex and Claude Code with symlinks:
-
-```bash
-./scripts/install-skill.sh --all
-```
-
-Install for only one host:
-
-```bash
-./scripts/install-skill.sh --codex
-./scripts/install-skill.sh --claude
-```
-
-Symlink installation keeps the personal skill synchronized with this checkout. To install independent copies instead:
-
-```bash
-./scripts/install-skill.sh --all --copy
-```
-
-The installer refuses to replace an existing skill. Use `--force` only when replacement is intentional.
-
-Personal installation targets are:
-
-| Host | Location | Invocation |
-|---|---|---|
-| Codex | `~/.agents/skills/branching-deliberation` | `$branching-deliberation` |
-| Claude Code | `~/.claude/skills/branching-deliberation` | `/branching-deliberation` |
-
-If a newly created top-level skill directory is not detected, restart the host. Current versions generally detect edits automatically.
-
-### Install from GitHub with a skill installer
-
-Codex’s `$skill-installer` can install the skill directly from this repository. Ask it:
+Codex:
 
 ```text
-Install the branching-deliberation skill from
-https://github.com/elijahbutler/branchforge/tree/main/skills/branching-deliberation
+$branchforge develop an auditable event-processing product. Begin with
+research, compare product concepts, then explore competing software
+architectures. Preserve every branch and ask before consequential actions.
 ```
 
-For broader marketplace distribution, the same skill can later be wrapped in a Codex or Claude plugin without changing its core `SKILL.md`.
+Claude Code:
+
+```text
+/branchforge develop an auditable event-processing product. Begin with
+research, compare product concepts, then explore competing software
+architectures. Preserve every branch and ask before consequential actions.
+```
+
+The active Codex or Claude model performs reasoning and spawns native subagents. No OpenAI or Anthropic API key is required for agent-native mode.
+
+## Manual agent-native installation
+
+Use these steps if you do not want the installer to change agent configuration.
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e ".[mcp]"
+```
+
+Install the complete skill suite:
+
+```bash
+./scripts/install-skill.sh --codex --force
+./scripts/install-skill.sh --claude --force
+```
+
+Register Codex:
+
+```bash
+codex mcp remove branchforge 2>/dev/null || true
+codex mcp add branchforge -- "$(pwd)/.venv/bin/branchforge" mcp
+```
+
+Register Claude Code:
+
+```bash
+claude mcp remove branchforge -s user 2>/dev/null || true
+claude mcp add -s user branchforge -- "$(pwd)/.venv/bin/branchforge" mcp
+```
+
+## Plugin installation
+
+The repository also contains Claude and Codex plugin manifests. The Python MCP backend must be available on `PATH` when installing through a marketplace. For local testing, the installer above is more predictable.
+
+### Claude Code marketplace
+
+```bash
+pipx install 'branchforge[mcp] @ git+https://github.com/elijahbutler/branchforge.git'
+claude plugin marketplace add elijahbutler/branchforge
+claude plugin install branchforge@branchforge
+```
+
+Then restart Claude Code and invoke `/branchforge:branchforge`. Claude namespaces plugin skills; the one-command installer above installs the same entrypoint as a personal skill named `/branchforge`.
+
+### Codex marketplace
+
+```bash
+pipx install 'branchforge[mcp] @ git+https://github.com/elijahbutler/branchforge.git'
+codex plugin marketplace add elijahbutler/branchforge
+codex plugin add branchforge@personal
+```
+
+Then start a new Codex task and invoke `$branchforge`.
+
+## Skill-only fallback
+
+If MCP cannot be installed, `branching-deliberation` remains an instruction-only fallback. It does not provide the same durable tool guarantees.
+
+Install only the skills:
+
+```bash
+./scripts/install-skill.sh --all --force
+```
+
+Fallback invocation:
+
+```text
+$branching-deliberation explore competing architectures for this system.
+```
 
 ## Using the skill effectively
 
@@ -423,6 +512,25 @@ asyncio.run(main())
 
 ## Runtime architecture
 
+### Agent-native control plane
+
+The `branchforge` skill is the public entrypoint. It frames the goal, creates a durable run, and delegates the stage loop to `branchforge-orchestrator`. Research, ideation, software, evaluation, and reporting skills load only for phases that need them.
+
+The MCP server exposes 19 deterministic tools. They create and inspect runs and stages; add, start, fail, prune, verify, and commit branches; attach claims, evidence, findings, and explicitly authorized artifacts; and render trees and dossiers. Every tool accepts an optional `cwd`. State is stored beneath that project at `.branchforge/state.db`.
+
+```mermaid
+flowchart LR
+    U["User goal"] --> H["Codex or Claude host"]
+    H --> S["BranchForge skill suite"]
+    S --> A1["Native explorer A"]
+    S --> A2["Native explorer B"]
+    S --> J["Native verifier and judge"]
+    S <--> M["BranchForge MCP tools"]
+    M <--> D[".branchforge state, objects, dossiers"]
+```
+
+BranchForge’s MCP server is a control and memory plane, not another agent framework hidden inside the host. The active model retains reasoning, delegation, browsing, coding, and approval behavior. Branch concurrency therefore depends on the host’s native subagent capabilities.
+
 ### Orchestrator
 
 `BranchForge` owns the stage lifecycle. It asks the provider for hypotheses, applies deterministic admission policy, runs explorers concurrently, verifies results, holds a pairwise tournament, commits the outcome, and writes lifecycle events.
@@ -547,7 +655,7 @@ The CLI currently prints weighted contributions. For example, a correctness scor
 
 ## Skill architecture
 
-The skill uses progressive disclosure:
+The agent-native suite uses progressive disclosure:
 
 1. Hosts initially see only its name and description.
 2. `SKILL.md` loads when a task matches or the user invokes it.
@@ -559,7 +667,7 @@ The references divide responsibilities:
 - `branch-contracts.md` — stage, explorer, critic, and collapse schemas;
 - `evaluation.md` — evidence hierarchy, pairwise judging, bias controls, and confidence.
 
-The skill is intentionally instruction-first. It tells the host to use native subagent and agent-team capabilities when available. If native delegation is unavailable, it falls back to isolated model calls, the Python kernel, or sequential analysis with independence controls.
+The public `branchforge` skill requires the durable MCP tools. The separate `branching-deliberation` skill is the instruction-only fallback when MCP is unavailable; it can use native delegation, provider calls, or carefully separated sequential analysis.
 
 ## Safety and control boundaries
 
@@ -588,6 +696,7 @@ The Python runtime currently avoids arbitrary tool execution entirely. The skill
 - Multi-round mock hypotheses are intentionally repetitive, so final mock survivors may remain from round zero.
 - Provider adapters do not yet implement retries, streaming, rate-limit backoff, token accounting, or dollar budgets.
 - A survivor synthesis is described by the skill but not yet implemented as a Python runtime transition.
+- Agent-native explorers share the host’s filesystem boundary until per-branch workspaces are implemented.
 
 These limitations are tracked in [PROJECT_PLAN.md](PROJECT_PLAN.md).
 
@@ -607,13 +716,14 @@ Directly from the checkout:
 PYTHONPATH=src python3 -m unittest discover -s tests -v
 ```
 
-### Validate the skill
-
-Use the Codex skill validator:
+### Validate the skills and plugin
 
 ```bash
-python3 /path/to/skill-creator/scripts/quick_validate.py \
-  skills/branching-deliberation
+for skill in skills/*; do
+  python3 /path/to/skill-creator/scripts/quick_validate.py "$skill"
+done
+
+python3 /path/to/plugin-creator/scripts/validate_plugin.py plugins/branchforge
 ```
 
 The repository includes three initial skill evaluations:

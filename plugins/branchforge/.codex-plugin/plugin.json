@@ -1,0 +1,29 @@
+{
+  "name": "branchforge",
+  "version": "0.1.0",
+  "description": "Durable branching deliberation with native agents and deterministic tools",
+  "author": {
+    "name": "Elijah Butler",
+    "url": "https://github.com/elijahbutler"
+  },
+  "homepage": "https://github.com/elijahbutler/branchforge",
+  "repository": "https://github.com/elijahbutler/branchforge",
+  "license": "MIT",
+  "keywords": ["agents", "reasoning", "research", "branching", "mcp"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "BranchForge",
+    "shortDescription": "Explore competing branches with durable evidence.",
+    "longDescription": "BranchForge coordinates native subagents while deterministic MCP tools preserve branch lineage, claims, evidence, findings, artifacts, dossiers, and committed decisions.",
+    "developerName": "Elijah Butler",
+    "category": "Productivity",
+    "capabilities": ["Interactive", "Write"],
+    "websiteURL": "https://github.com/elijahbutler/branchforge",
+    "defaultPrompt": [
+      "Explore competing approaches with BranchForge.",
+      "Investigate this problem with durable branches.",
+      "Build this product through research and software branches."
+    ]
+  },
+  "mcpServers": "./.mcp.json"
+}

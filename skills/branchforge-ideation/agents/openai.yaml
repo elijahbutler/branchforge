@@ -1,0 +1,4 @@
+interface:
+  display_name: "BranchForge Ideation"
+  short_description: "Develop and test competing product ideas"
+  default_prompt: "Use $branchforge-ideation to develop competing product concepts and assumptions."

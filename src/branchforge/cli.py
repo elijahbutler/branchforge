@@ -36,6 +36,7 @@ def parser() -> argparse.ArgumentParser:
     dossier = commands.add_parser("dossier", help="Render portable dossiers for a run")
     dossier.add_argument("run_id", nargs="?")
     commands.add_parser("runs", help="List recorded run IDs")
+    commands.add_parser("mcp", help="Run the agent-native MCP server over stdio")
     return root
 
 
@@ -85,6 +86,11 @@ async def execute(args: argparse.Namespace) -> int:
 
 def main() -> None:
     args = parser().parse_args()
+    if args.command == "mcp":
+        from .mcp_server import run
+
+        run()
+        return
     raise SystemExit(asyncio.run(execute(args)))
 
 

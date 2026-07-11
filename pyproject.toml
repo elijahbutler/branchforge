@@ -12,6 +12,9 @@ license = {text = "MIT"}
 authors = [{name = "Elijah Butler"}]
 dependencies = []
 
+[project.optional-dependencies]
+mcp = ["mcp>=1.0,<2"]
+
 [project.scripts]
 branchforge = "branchforge.cli:main"
 
