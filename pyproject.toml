@@ -1,0 +1,22 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "branchforge"
+version = "0.1.0"
+description = "Adaptive, evidence-driven tree search for multi-agent systems"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [{name = "Elijah Butler"}]
+dependencies = []
+
+[project.scripts]
+branchforge = "branchforge.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/branchforge"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

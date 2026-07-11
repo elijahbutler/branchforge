@@ -1,0 +1,28 @@
+{
+  "skill": "branching-deliberation",
+  "cases": [
+    {
+      "query": "Choose between an event-sourced and conventional relational architecture for an auditable payment system. Explore competing approaches before implementing.",
+      "expected_behavior": [
+        "Frames a bounded architecture stage with invariants and a rubric",
+        "Creates materially distinct branches with falsifiers",
+        "Uses verification and pairwise judgment before committing"
+      ]
+    },
+    {
+      "query": "Investigate an intermittent concurrency failure with several plausible root causes and do not settle on the first explanation.",
+      "expected_behavior": [
+        "Branches on distinct causal hypotheses",
+        "Requests or runs discriminating experiments",
+        "Preserves falsified causes in the decision record"
+      ]
+    },
+    {
+      "query": "Rename this local variable for clarity.",
+      "expected_behavior": [
+        "Does not create a multi-agent branch search",
+        "Completes the low-impact reversible task directly"
+      ]
+    }
+  ]
+}

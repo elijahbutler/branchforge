@@ -1,0 +1,4 @@
+interface:
+  display_name: "Branching Deliberation"
+  short_description: "Explore and judge competing solution branches"
+  default_prompt: "Use $branching-deliberation to explore competing approaches and commit the strongest verified result."

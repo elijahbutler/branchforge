@@ -1,0 +1,18 @@
+{
+  "goal": "Design a reliable event-processing service",
+  "stages": [
+    {
+      "name": "architecture",
+      "mode": "research",
+      "objective": "Select the processing and persistence architecture",
+      "deliverable": "Architecture decision with falsifiable assumptions",
+      "invariants": ["At-least-once delivery", "Replayable events", "Tenant isolation"]
+    },
+    {
+      "name": "implementation",
+      "mode": "software",
+      "objective": "Develop the smallest production-shaped vertical slice",
+      "deliverable": "Tested implementation plan"
+    }
+  ]
+}
