@@ -139,7 +139,7 @@ Or install for one:
 ./scripts/install-agent.sh --claude --force
 ```
 
-`--claude` installs the skill suite and MCP server for Claude Code CLI, and safely adds the same absolute MCP endpoint to Claude Desktop without replacing other Desktop servers. A backup is written beside the Desktop configuration before it is changed.
+`--claude` installs the skill suite and MCP server for Claude Code CLI. It also builds a separate Desktop-safe runtime under Claude's Application Support directory and registers that endpoint without replacing other Desktop servers. This separation is required because macOS may deny Claude Desktop access to virtual environments inside `Documents`. A backup is written beside the Desktop configuration before it is changed.
 
 The installer:
 
@@ -236,7 +236,7 @@ Then check for duplicate definitions:
 claude mcp list
 ```
 
-There should be no `Conflicting scopes` warning for `branchforge`. The recommended installation has one user-scoped endpoint pointing to the checkout’s absolute `.venv/bin/branchforge mcp` command.
+There should be no `Conflicting scopes` warning for `branchforge`. Claude Code uses the checkout’s absolute `.venv/bin/branchforge mcp` command. Claude Desktop uses its separate runtime under `~/Library/Application Support/Claude/branchforge-runtime/` to avoid macOS privacy denials.
 
 ## Manual agent-native installation
 

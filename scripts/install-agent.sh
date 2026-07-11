@@ -54,7 +54,8 @@ install_claude() {
   claude mcp remove branchforge -s user >/dev/null 2>&1 || true
   claude mcp add -s user branchforge -- "$server" mcp
   echo "Registered BranchForge MCP with Claude Code"
-  "$venv/bin/python" "$repo_root/scripts/install-claude-desktop.py" "$server"
+  "$venv/bin/python" "$repo_root/scripts/install-claude-desktop.py" "$server" \
+    --runtime-source "$repo_root"
   echo "Registered BranchForge MCP with Claude Desktop"
 }
 

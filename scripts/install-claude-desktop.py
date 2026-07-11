@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -21,6 +22,31 @@ def default_config() -> Path:
             raise RuntimeError("APPDATA is not set")
         return Path(appdata) / "Claude" / "claude_desktop_config.json"
     raise RuntimeError("Claude Desktop is supported on macOS and Windows")
+
+
+def install_runtime(source: Path, runtime: Path) -> Path:
+    source = source.expanduser().resolve()
+    if not (source / "pyproject.toml").is_file():
+        raise FileNotFoundError(f"BranchForge source checkout not found: {source}")
+    runtime = runtime.expanduser().resolve()
+    venv = runtime / ".venv"
+    subprocess.run([sys.executable, "-m", "venv", str(venv)], check=True)
+    python = venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    subprocess.run(
+        [
+            str(python),
+            "-m",
+            "pip",
+            "install",
+            "--upgrade",
+            "--force-reinstall",
+            f"{source}[mcp]",
+        ],
+        check=True,
+    )
+    server = venv / ("Scripts/branchforge.exe" if os.name == "nt" else "bin/branchforge")
+    subprocess.run([str(server), "--help"], check=True, stdout=subprocess.DEVNULL)
+    return server
 
 
 def install(server: Path, config: Path) -> bool:
@@ -70,9 +96,16 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("server", type=Path)
     parser.add_argument("--config", type=Path, default=None, help="Override config path for testing")
+    parser.add_argument("--runtime-source", type=Path, default=None, help="Install a Desktop-safe runtime from this checkout")
+    parser.add_argument("--runtime-dir", type=Path, default=None, help="Override the Desktop runtime directory")
     args = parser.parse_args()
     config = (args.config or default_config()).expanduser().resolve()
-    changed = install(args.server, config)
+    server = args.server
+    if args.runtime_source:
+        runtime = args.runtime_dir or config.parent / "branchforge-runtime"
+        server = install_runtime(args.runtime_source, runtime)
+        print(f"Installed Desktop-safe BranchForge runtime: {server}")
+    changed = install(server, config)
     action = "Registered" if changed else "Already registered"
     print(f"{action} BranchForge MCP in Claude Desktop: {config}")
 

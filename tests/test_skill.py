@@ -97,6 +97,12 @@ class SkillPackageTests(unittest.TestCase):
             self.assertEqual(data["mcpServers"]["branchforge"]["args"], ["mcp"])
             self.assertTrue(config.with_name(f"{config.name}.branchforge.bak").is_file())
 
+    def test_desktop_installer_supports_sandbox_safe_runtime(self):
+        installer = (ROOT / "scripts" / "install-agent.sh").read_text()
+        self.assertIn("--runtime-source", installer)
+        desktop_installer = (ROOT / "scripts" / "install-claude-desktop.py").read_text()
+        self.assertIn('config.parent / "branchforge-runtime"', desktop_installer)
+
     def test_skill_has_trigger_and_non_trigger_evaluations(self):
         data = json.loads((SKILL / "evals" / "evals.json").read_text())
         self.assertEqual(data["skill"], "branching-deliberation")
