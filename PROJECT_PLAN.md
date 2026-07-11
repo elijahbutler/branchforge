@@ -25,6 +25,41 @@ BranchForge spends parallel model inference only at consequential, uncertain dec
 - Codex and Claude skill suites with phase-specific orchestration instructions
 - Codex and Claude plugin manifests plus local installers
 
+## Prioritized roadmap
+
+The next work should make BranchForge operationally legible before making it broader.
+The core branch graph is durable; the product now needs to help users and host agents
+understand what is unfinished, what is safe to do next, and why a run can or cannot
+finish.
+
+### R1 — Guided run UX
+
+- Add `branchforge status [run_id]` and MCP `run_status`.
+- Report active run, stage state, branch counts, unresolved branch IDs, blockers, next actions, and finish readiness.
+- Update skills with a continuation path for existing runs that inspects status before creating new stages or branches.
+- Be explicit that this is guided continuation from durable state, not automatic worker/process resume.
+
+### R2 — Lifecycle consistency
+
+- Keep native tools, MCP exports, README, and tests in exact sync.
+- Add an MCP tool-surface contract test that verifies every intended lifecycle/evidence/artifact/dossier tool is exposed.
+- Require meaningful reasons for terminal prune/fail actions.
+- Make negative verification produce clear resolution guidance so rejected candidates do not remain ambiguous.
+- Ensure failed partial-run dossiers do not leave active-looking branch records without explanation.
+
+### R3 — Install confidence
+
+- Add `branchforge doctor --host codex|claude|claude-desktop`.
+- Diagnose Python/runtime import, MCP stdio startup, skill installation, host CLI availability, configured command path, duplicate Claude scopes, Desktop config shape, and marketplace/PATH readiness.
+- Back the doctor with fake-host and temporary-config tests.
+
+### R4 — Objective evaluators and benchmarks
+
+- Build 8-12 fixed benchmark tasks comparing BranchForge with a strong single-agent baseline.
+- Score correctness, evidence quality, cost, latency, and calibrated uncertainty.
+- Add one deterministic coding evaluator first, using tests/static checks/artifact inspection.
+- Use evaluator results as structured evidence that cannot be overridden by a model judge when hard constraints fail.
+
 ## Deliberately out of scope for v0.1
 
 - Arbitrary tool execution by the headless Python kernel

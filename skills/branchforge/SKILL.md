@@ -22,8 +22,9 @@ If a consequential choice is missing, ask one compact checkpoint. Otherwise proc
 ## Start
 
 1. Confirm the BranchForge MCP tools are available. If unavailable, stop and explain that the plugin/MCP installation is incomplete. Do not silently switch to model API calls or the CLI.
-2. Call `run_create` with the goal and search budget.
-3. Load `branchforge-orchestrator` and pass the run ID plus the intake contract. Loading means activating that installed skill by name; if the host has no skill dispatcher, read its `SKILL.md` from the installed skill suite. Do not recursively invoke `branchforge` again.
+2. If the user provides an existing run ID or asks to continue/resume, call `run_status` first. Use the returned blockers and next actions to continue from durable state; do not create duplicate stages or branches unless the status makes that the next valid action.
+3. Otherwise call `run_create` with the goal and search budget.
+4. Load `branchforge-orchestrator` and pass the run ID plus the intake contract. Loading means activating that installed skill by name; if the host has no skill dispatcher, read its `SKILL.md` from the installed skill suite. Do not recursively invoke `branchforge` again.
 
 ## Stage-loop fallback
 

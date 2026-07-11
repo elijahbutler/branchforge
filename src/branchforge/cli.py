@@ -31,6 +31,8 @@ def parser() -> argparse.ArgumentParser:
     run.add_argument("--stage-mode", action="append", choices=[mode.value for mode in BranchMode], default=[], help="Mode for each --stage; repeat in stage order")
     inspect = commands.add_parser("inspect", help="Print a run's event history")
     inspect.add_argument("run_id", nargs="?")
+    status = commands.add_parser("status", help="Summarize run progress, blockers, and next actions")
+    status.add_argument("run_id", nargs="?")
     tree = commands.add_parser("tree", help="Print a run's reconstructed branch tree")
     tree.add_argument("run_id", nargs="?")
     dossier = commands.add_parser("dossier", help="Render portable dossiers for a run")
@@ -53,6 +55,20 @@ async def execute(args: argparse.Namespace) -> int:
                 print("No runs found.")
                 return 1
             print(json.dumps(store.events(run_id), indent=2))
+            return 0
+        if args.command == "status":
+            tools_repository = BranchRepository(store, args.workspace)
+            run_id = args.run_id or next(iter(store.run_ids()), None)
+            if not run_id:
+                print(json.dumps({
+                    "run": None,
+                    "stages": [],
+                    "blockers": ["No BranchForge runs found."],
+                    "next_actions": ["Create a run with branchforge run or run_create."],
+                    "finishable": False,
+                }, indent=2))
+                return 1
+            print(json.dumps(tools_repository.run_status(run_id), indent=2))
             return 0
         if args.command in {"tree", "dossier"}:
             run_id = args.run_id or next(iter(store.run_ids()), None)

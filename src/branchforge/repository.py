@@ -227,6 +227,80 @@ class BranchRepository:
             item["rubric"] = json.loads(item["rubric"])
         return result
 
+    def run_status(self, run_id: str) -> dict[str, Any]:
+        run = self.get_run(run_id)
+        if run is None:
+            raise KeyError(f"Unknown run: {run_id}")
+        stages = self.stages(run_id)
+        branches = self.branches(run_id)
+        blockers: list[str] = []
+        next_actions: list[str] = []
+        summaries: list[dict[str, Any]] = []
+        terminal = {
+            BranchStatus.PRUNED.value,
+            BranchStatus.FAILED.value,
+            BranchStatus.COMMITTED.value,
+        }
+        active = {
+            BranchStatus.PROPOSED.value,
+            BranchStatus.ADMITTED.value,
+            BranchStatus.RUNNING.value,
+        }
+        for stage in stages:
+            stage_branches = [branch for branch in branches if branch["stage"] == stage["name"]]
+            counts = {status.value: 0 for status in BranchStatus}
+            for branch in stage_branches:
+                counts[branch["status"]] += 1
+            unfinished = [branch for branch in stage_branches if branch["status"] in active]
+            verified = [branch for branch in stage_branches if branch["status"] == BranchStatus.VERIFIED.value]
+            explored = [branch for branch in stage_branches if branch["status"] == BranchStatus.EXPLORED.value]
+            if stage["status"] == "running":
+                if not stage_branches:
+                    blockers.append(f"Stage {stage['name']} has no branches.")
+                    next_actions.append(f"Add two to four branches with branch_add for stage {stage['name']}.")
+                for branch in unfinished:
+                    blockers.append(f"Branch {branch['branch_id']} is {branch['status']} in stage {stage['name']}.")
+                    if branch["status"] in {BranchStatus.PROPOSED.value, BranchStatus.ADMITTED.value}:
+                        next_actions.append(f"Start, prune, fail, or record a result for branch {branch['branch_id']}.")
+                    elif branch["status"] == BranchStatus.RUNNING.value:
+                        next_actions.append(f"Record a result with branch_record_result or fail branch {branch['branch_id']}.")
+                for branch in explored:
+                    next_actions.append(f"Verify or prune explored branch {branch['branch_id']}.")
+                if verified and not unfinished:
+                    next_actions.append(f"Commit a verified winner for stage {stage['name']} with stage_commit.")
+                elif stage_branches and not verified:
+                    blockers.append(f"Stage {stage['name']} has no verified branch to commit.")
+            summaries.append({
+                "name": stage["name"],
+                "status": stage["status"],
+                "mode": stage["mode"],
+                "winner_id": stage.get("winner_id"),
+                "branch_counts": counts,
+                "unresolved_branch_ids": [
+                    branch["branch_id"]
+                    for branch in stage_branches
+                    if branch["status"] not in terminal
+                ],
+            })
+
+        if not stages:
+            blockers.append("Run has no stages.")
+            next_actions.append("Create a bounded stage with stage_create.")
+        incomplete = [stage["name"] for stage in stages if stage["status"] != "committed"]
+        finishable = run["status"] == "running" and bool(stages) and not incomplete
+        if finishable:
+            next_actions.append("Finish the run with run_finish.")
+        elif incomplete:
+            blockers.append(f"Run cannot finish until stages are committed: {', '.join(incomplete)}.")
+
+        return {
+            "run": run,
+            "stages": summaries,
+            "blockers": list(dict.fromkeys(blockers)),
+            "next_actions": list(dict.fromkeys(next_actions)),
+            "finishable": finishable,
+        }
+
     def create_branch(self, run_id: str, stage: str, hypothesis: Hypothesis, mode: BranchMode) -> None:
         if self.get_run(run_id) is None:
             raise ValueError(f"Run does not exist: {run_id}")

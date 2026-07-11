@@ -493,11 +493,12 @@ Additional storage commands:
 
 ```bash
 branchforge runs
+branchforge status RUN_ID
 branchforge tree RUN_ID
 branchforge dossier RUN_ID
 ```
 
-`tree` reconstructs parent-child lineage from SQLite. `dossier` refreshes the portable files and prints their run directory.
+`status` prints run progress, blockers, next actions, and finish readiness as JSON. `tree` reconstructs parent-child lineage from SQLite. `dossier` refreshes the portable files and prints their run directory.
 
 ## Python API
 
@@ -566,7 +567,7 @@ asyncio.run(main())
 
 The `branchforge` skill is the public entrypoint. It frames the goal, creates a durable run, and delegates the stage loop to `branchforge-orchestrator`. Research, ideation, software, evaluation, and reporting skills load only for phases that need them.
 
-The MCP server exposes 19 deterministic tools. They create and inspect runs and stages; add, start, fail, prune, verify, and commit branches; attach claims, evidence, findings, and explicitly authorized artifacts; and render trees and dossiers. Every tool accepts an optional `cwd`. State is stored beneath that project at `.branchforge/state.db`.
+The MCP server exposes 20 deterministic tools. They create, inspect, and summarize runs and stages; add, start, fail, prune, verify, and commit branches; attach claims, evidence, findings, and explicitly authorized artifacts; and render trees and dossiers. Every tool accepts an optional `cwd`. State is stored beneath that project at `.branchforge/state.db`.
 
 ```mermaid
 flowchart LR

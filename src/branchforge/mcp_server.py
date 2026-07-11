@@ -44,6 +44,11 @@ Never broaden the user's permissions through branching."""
         return _tools(cwd).run_view(run_id)
 
     @server.tool()
+    def run_status(run_id: str | None = None, cwd: str | None = None) -> dict[str, Any]:
+        """Summarize run progress, blockers, and safe next actions."""
+        return _tools(cwd).run_status(run_id)
+
+    @server.tool()
     def run_finish(run_id: str, error: str | None = None, cwd: str | None = None) -> dict[str, Any]:
         """Complete or fail a run and render its durable dossier."""
         return _tools(cwd).run_finish(run_id, error=error)

@@ -66,6 +66,22 @@ class BranchForgeTools:
                 raise KeyError(f"Unknown run: {run_id}")
             return {"run": run, "stages": repository.stages(run_id)}
 
+    def run_status(self, run_id: str | None = None) -> dict[str, Any]:
+        """Summarize run progress, blockers, and safe next actions."""
+        with self._repository() as repository:
+            selected = run_id
+            if selected is None:
+                selected = next(iter(repository.store.run_ids()), None)
+                if selected is None:
+                    return {
+                        "run": None,
+                        "stages": [],
+                        "blockers": ["No BranchForge runs found."],
+                        "next_actions": ["Create a run with run_create."],
+                        "finishable": False,
+                    }
+            return repository.run_status(selected)
+
     def run_finish(self, run_id: str, *, error: str | None = None) -> dict[str, Any]:
         with self._repository() as repository:
             run = repository.get_run(run_id)
@@ -274,6 +290,8 @@ class BranchForgeTools:
             return repository.get_branch(branch_id) or {}
 
     def branch_prune(self, run_id: str, branch_id: str, reason: str) -> dict[str, Any]:
+        if not reason.strip():
+            raise ValueError("A prune reason is required")
         with self._repository() as repository:
             repository.transition(run_id, branch_id, BranchStatus.PRUNED, reason=reason)
             repository.render_branch(branch_id)

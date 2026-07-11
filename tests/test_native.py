@@ -97,6 +97,31 @@ class NativeToolsTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "unfinished stages"):
                 tools.run_finish(run_id)
 
+    def test_run_status_reports_blockers_and_next_actions(self):
+        with tempfile.TemporaryDirectory() as directory:
+            tools = BranchForgeTools(directory)
+            run_id = tools.run_create("Explain current progress")["run_id"]
+            tools.stage_create(run_id, "stage", "Select an approach")
+            branch = tools.branch_add(run_id, "stage", "Candidate", "It may work", "Simple")
+
+            status = tools.run_status(run_id)
+            self.assertFalse(status["finishable"])
+            self.assertEqual(status["run"]["run_id"], run_id)
+            self.assertEqual(status["stages"][0]["branch_counts"]["admitted"], 1)
+            self.assertEqual(status["stages"][0]["unresolved_branch_ids"], [branch["branch_id"]])
+            self.assertTrue(any("Branch" in item and "admitted" in item for item in status["blockers"]))
+            self.assertTrue(any("record a result" in item for item in status["next_actions"]))
+
+    def test_run_status_defaults_to_latest_run(self):
+        with tempfile.TemporaryDirectory() as directory:
+            tools = BranchForgeTools(directory)
+            first = tools.run_create("First")["run_id"]
+            second = tools.run_create("Second")["run_id"]
+
+            status = tools.run_status()
+            self.assertEqual(status["run"]["run_id"], second)
+            self.assertNotEqual(status["run"]["run_id"], first)
+
     def test_stage_rejects_unfinished_branch_and_accepts_recorded_failure(self):
         with tempfile.TemporaryDirectory() as directory:
             tools = BranchForgeTools(directory)
@@ -114,6 +139,20 @@ class NativeToolsTests(unittest.TestCase):
             self.assertEqual(result["status"], "failed")
             tools.stage_commit(run_id, "stage", winner["branch_id"], "Best evidence", 0.8)
 
+    def test_prune_requires_reason(self):
+        with tempfile.TemporaryDirectory() as directory:
+            tools = BranchForgeTools(directory)
+            run_id = tools.run_create("Reject weak branches explicitly")["run_id"]
+            tools.stage_create(run_id, "stage", "Select a robust approach")
+            branch = tools.branch_add(run_id, "stage", "Weak", "Unclear", "Low evidence")
+
+            with self.assertRaisesRegex(ValueError, "prune reason"):
+                tools.branch_prune(run_id, branch["branch_id"], " ")
+
+            pruned = tools.branch_prune(run_id, branch["branch_id"], "Dominated by stronger evidence")
+            self.assertEqual(pruned["status"], "pruned")
+            self.assertEqual(pruned["rejection_reason"], "Dominated by stronger evidence")
+
     def test_optional_mcp_server_exposes_native_tools(self):
         try:
             import mcp  # noqa: F401
@@ -124,7 +163,8 @@ class NativeToolsTests(unittest.TestCase):
 
         server = build_server()
         names = {tool.name for tool in server._tool_manager.list_tools()}
-        self.assertEqual(len(names), 19)
+        self.assertEqual(len(names), 20)
+        self.assertIn("run_status", names)
         self.assertIn("branch_fail", names)
         prompts = {prompt.name for prompt in server._prompt_manager.list_prompts()}
         self.assertIn("branchforge", prompts)

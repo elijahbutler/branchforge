@@ -7,6 +7,13 @@ description: Coordinates an active BranchForge run through durable stages, compe
 
 Own the search lifecycle. Use MCP tools as the authoritative state interface.
 
+## Resume/continuation
+
+When given an existing run ID, call `run_status` before creating or modifying state.
+Continue from the reported blockers and next actions. Do not recreate committed stages,
+duplicate existing branches, or present process-level worker resume as available unless
+the host actually provides it.
+
 ## For each stage
 
 1. Call `stage_create` with objective, mode, deliverable, invariants, and rubric.
