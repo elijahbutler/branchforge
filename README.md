@@ -1,8 +1,6 @@
 # BranchForge
 
-<p align="center">
-  <img src="docs/assets/branchforge-banner.svg" alt="BranchForge: branch difficult decisions, collapse with evidence">
-</p>
+![BranchForge: branch difficult decisions, collapse with evidence](docs/assets/branchforge-banner.svg)
 
 BranchForge is an adaptive deliberation system for difficult decisions. It explores a bounded set of materially different hypotheses, develops them independently, verifies their claims, audits their decisive disagreements, and collapses the search into a committed stage result.
 
