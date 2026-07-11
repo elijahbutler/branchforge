@@ -126,6 +126,8 @@ class NativeToolsTests(unittest.TestCase):
         names = {tool.name for tool in server._tool_manager.list_tools()}
         self.assertEqual(len(names), 19)
         self.assertIn("branch_fail", names)
+        prompts = {prompt.name for prompt in server._prompt_manager.list_prompts()}
+        self.assertIn("branchforge", prompts)
 
 
 if __name__ == "__main__":

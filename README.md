@@ -117,7 +117,7 @@ Requirements:
 
 - Python 3.11+
 - Git
-- Codex, Claude Code, or both
+- Codex, Claude Code, Claude Desktop, or a combination
 
 Clone the repository:
 
@@ -138,6 +138,8 @@ Or install for one:
 ./scripts/install-agent.sh --codex --force
 ./scripts/install-agent.sh --claude --force
 ```
+
+`--claude` installs the skill suite and MCP server for Claude Code CLI, and safely adds the same absolute MCP endpoint to Claude Desktop without replacing other Desktop servers. A backup is written beside the Desktop configuration before it is changed.
 
 The installer:
 
@@ -160,6 +162,17 @@ Claude Code:
 
 ```bash
 claude mcp get branchforge
+```
+
+Claude Desktop on macOS:
+
+```bash
+python3 - <<'PY'
+import json
+from pathlib import Path
+p = Path.home() / "Library/Application Support/Claude/claude_desktop_config.json"
+print(json.loads(p.read_text())["mcpServers"]["branchforge"])
+PY
 ```
 
 The configured command should end with:
@@ -187,6 +200,18 @@ architectures. Preserve every branch and ask before consequential actions.
 ```
 
 The active Codex or Claude model performs reasoning and spawns native subagents. No OpenAI or Anthropic API key is required for agent-native mode.
+
+### Claude Desktop surfaces
+
+Claude Desktop exposes different capabilities depending on where the conversation runs:
+
+| Desktop surface | BranchForge availability |
+|---|---|
+| **Code tab, Local session** | `/branchforge` skill plus all MCP tools |
+| **Code tab, Remote session** | Local skills/plugins and local MCP servers are unavailable |
+| **Regular Chat or Cowork** | BranchForge MCP tools and its `branchforge` MCP prompt; Claude Code slash-skills are not supported in this surface |
+
+After installation, completely quit Claude Desktop with `Cmd+Q` and reopen it. In a regular chat, click the `+` button and open **Connectors** to confirm BranchForge is connected. In the Code tab, select **Local** before starting a session, then type `/branchforge` or choose it under `+` → **Slash commands**.
 
 ### Claude troubleshooting
 

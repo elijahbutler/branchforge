@@ -3,6 +3,7 @@ set -euo pipefail
 
 usage() {
   echo "Usage: $0 [--codex|--claude|--all] [--force]"
+  echo "  --claude installs Claude Code CLI skills/MCP and Claude Desktop MCP"
 }
 
 platform="all"
@@ -53,6 +54,8 @@ install_claude() {
   claude mcp remove branchforge -s user >/dev/null 2>&1 || true
   claude mcp add -s user branchforge -- "$server" mcp
   echo "Registered BranchForge MCP with Claude Code"
+  "$venv/bin/python" "$repo_root/scripts/install-claude-desktop.py" "$server"
+  echo "Registered BranchForge MCP with Claude Desktop"
 }
 
 case "$platform" in
@@ -64,4 +67,4 @@ case "$platform" in
     ;;
 esac
 
-echo "Restart the agent host, then invoke BranchForge."
+echo "Restart the agent host. In Claude Desktop, use a Local Code session for /branchforge."

@@ -21,6 +21,18 @@ def build_server() -> Any:
 
     server = FastMCP("branchforge")
 
+    @server.prompt()
+    def branchforge(goal: str) -> str:
+        """Start a durable branching-deliberation workflow for a goal."""
+        return f"""Use BranchForge for this goal: {goal}
+
+Keep reasoning in the host and use the BranchForge MCP tools as authoritative state.
+Call run_create, then create bounded stages. For each stage, persist two to four
+materially distinct hypotheses with branch_add, explore them independently, record
+results and evidence, verify viable candidates, resolve every admitted branch, and
+commit only a verified winner. Finish with run_finish and report the dossier path.
+Never broaden the user's permissions through branching."""
+
     @server.tool()
     def run_create(goal: str, max_branches: int = 3, survivor_width: int = 2, max_rounds: int = 2, novelty_threshold: float = 0.6, cwd: str | None = None) -> dict[str, Any]:
         """Create a durable BranchForge run in the target project."""

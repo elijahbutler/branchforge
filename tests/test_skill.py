@@ -1,5 +1,8 @@
 import json
 import re
+import subprocess
+import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -68,6 +71,31 @@ class SkillPackageTests(unittest.TestCase):
         self.assertIn("--force-reinstall", installer)
         self.assertIn('"$server" --help', installer)
         self.assertFalse((ROOT / ".mcp.json").exists())
+
+    def test_desktop_installer_preserves_existing_configuration(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = root / "claude_desktop_config.json"
+            config.write_text(json.dumps({"preferences": {"theme": "dark"}, "mcpServers": {"other": {"command": "other"}}}))
+            server = root / "branchforge"
+            server.write_text("#!/bin/sh\n")
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(ROOT / "scripts" / "install-claude-desktop.py"),
+                    str(server),
+                    "--config",
+                    str(config),
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            data = json.loads(config.read_text())
+            self.assertEqual(data["preferences"], {"theme": "dark"})
+            self.assertIn("other", data["mcpServers"])
+            self.assertEqual(data["mcpServers"]["branchforge"]["args"], ["mcp"])
+            self.assertTrue(config.with_name(f"{config.name}.branchforge.bak").is_file())
 
     def test_skill_has_trigger_and_non_trigger_evaluations(self):
         data = json.loads((SKILL / "evals" / "evals.json").read_text())
