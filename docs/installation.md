@@ -52,6 +52,7 @@ By default BranchForge records check results that the agent reports. To have it 
 
 ```json
 {
+  "projects": ["/Users/you/code/my-project"],
   "checks": {
     "unit": {"command": ["pytest", "-q"]},
     "types": {"command": ["mypy", "src"], "kind": "static_analysis"}
@@ -66,7 +67,7 @@ claude mcp remove branchforge -s user
 claude mcp add -s user branchforge -e BRANCHFORGE_CHECKS_FILE="$HOME/.config/branchforge/checks.json" -- "$PWD/.venv/bin/branchforge" mcp
 ```
 
-An agent can reference these checks by name and cannot supply or change a command. BranchForge refuses a checks file inside the project. Commands run without a shell, with your user's permissions, in the project directory or one of its git worktrees. A test runner still executes the code the agent wrote, so allow only commands you would let the agent run.
+`projects` lists the project directories where these checks may run. An agent can reference the checks by name and cannot supply or change a command, and it cannot use them in a project you did not list. BranchForge refuses a checks file inside a listed project. Commands run without a shell, with your user's permissions, in the project directory or one of its git worktrees. A test runner still executes the code the agent wrote, so allow only commands you would let the agent run.
 
 ## Install As A Claude Code Plugin
 

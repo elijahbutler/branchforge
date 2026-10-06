@@ -200,7 +200,7 @@ Never broaden the user's permissions through branching."""
         branch_id: BranchId,
         name: Annotated[str, Field(description="Name of a check the stage referenced in stage_create.")],
         workdir: Annotated[str | None, Field(description="Directory holding this branch's work: a path inside cwd, or a git worktree of the project. Defaults to cwd.")] = None,
-        timeout_seconds: Annotated[float, Field(description="Seconds before the command is killed and recorded as failed.")] = 600.0,
+        timeout_seconds: Annotated[float, Field(description="Seconds before the command is killed and recorded as failed. At most 3600.")] = 600.0,
         cwd: Cwd = None,
     ) -> dict[str, Any]:
         """Run a user-allowed check command in the branch's directory and record the result. BranchForge runs it, so the outcome does not depend on what an agent reports. Returns pass or fail, the exit code, and the tail of the output; the full log is stored as an artifact."""

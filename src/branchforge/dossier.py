@@ -32,7 +32,7 @@ def _dump(value: Any) -> str:
 
 def _check_line(check: dict[str, Any]) -> str:
     target = f" for {check['invariant']}" if check["invariant"] else ""
-    source = "run by BranchForge" if check.get("executed") else "reported"
+    source = f"run by BranchForge in {check.get('workdir')}" if check.get("executed") else "reported"
     return f"- {'pass' if check['passed'] else 'FAIL'}: {check['name']} ({check['kind']}, {source}){target}"
 
 

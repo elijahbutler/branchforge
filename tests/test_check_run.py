@@ -32,8 +32,11 @@ class CheckRunCase(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    def allow(self, command, **extra):
-        self.checks_file.write_text(json.dumps({"checks": {"isolation": {"command": command, **extra}}}))
+    def allow(self, command, projects=None, **extra):
+        self.checks_file.write_text(json.dumps({
+            "projects": [str(self.root)] if projects is None else projects,
+            "checks": {"isolation": {"command": command, **extra}},
+        }))
 
     def stage(self, **check):
         return self.tools.stage_create(
@@ -72,6 +75,24 @@ class CommandSourceTests(CheckRunCase):
             with self.assertRaisesRegex(ValueError, "outside the project"):
                 self.stage()
 
+    def test_project_the_user_did_not_list_cannot_use_the_checks(self):
+        self.allow(PASSING, projects=[str(self.root / "some-other-project")])
+        with self.assertRaisesRegex(ValueError, "does not list this project"):
+            self.stage()
+
+    def test_caller_cannot_widen_the_project_to_reach_other_directories(self):
+        # cwd is a tool argument, so an agent could pass a parent directory to make any path "inside".
+        self.stage()
+        branch_id = self.explored()
+        wide = BranchForgeTools(self.root.parent)
+        with self.assertRaisesRegex(ValueError, "does not list this project"):
+            wide.check_run(self.run_id, branch_id, "isolation", workdir=str(self.root))
+
+    def test_checks_file_without_a_project_list_is_refused(self):
+        self.checks_file.write_text(json.dumps({"checks": {"isolation": {"command": PASSING}}}))
+        with self.assertRaisesRegex(ValueError, "projects"):
+            self.stage()
+
     def test_command_is_read_from_the_checks_file_at_run_time(self):
         self.stage()
         branch_id = self.explored()
@@ -81,7 +102,7 @@ class CommandSourceTests(CheckRunCase):
     def test_check_removed_from_the_checks_file_no_longer_runs(self):
         self.stage()
         branch_id = self.explored()
-        self.checks_file.write_text(json.dumps({"checks": {}}))
+        self.checks_file.write_text(json.dumps({"projects": [str(self.root)], "checks": {}}))
         with self.assertRaisesRegex(ValueError, "no longer in the checks file"):
             self.tools.check_run(self.run_id, branch_id, "isolation")
 
@@ -109,6 +130,7 @@ class ExecutedCheckTests(CheckRunCase):
         self.assertTrue(check["passed"])
         self.assertTrue(check["executed"])
         self.assertEqual(check["exit_code"], 0)
+        self.assertEqual(check["workdir"], str(self.root))
         self.assertIn("3 passed", check["details"])
         artifacts = json.loads(
             (self.root / ".branchforge" / "runs" / self.run_id / "branches" / branch_id / "ARTIFACTS.json").read_text()
@@ -146,6 +168,11 @@ class ExecutedCheckTests(CheckRunCase):
         check = self.tools.check_run(self.run_id, branch_id, "isolation", timeout_seconds=0.5)
         self.assertFalse(check["passed"])
         self.assertIn("timed out", check["details"])
+
+    def test_timeout_has_an_upper_bound(self):
+        self.stage()
+        with self.assertRaisesRegex(ValueError, "at most 3600"):
+            self.tools.check_run(self.run_id, self.explored(), "isolation", timeout_seconds=10**9)
 
     def test_command_runs_in_the_given_directory_inside_the_project(self):
         self.allow([sys.executable, "-c", "import os; print(os.path.basename(os.getcwd()))"])

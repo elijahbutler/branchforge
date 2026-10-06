@@ -184,6 +184,7 @@ class BranchRepository:
             self._add_column("stages", "evidence_policy", "TEXT NOT NULL DEFAULT 'judged'")
             self._add_column("stages", "checks", "TEXT NOT NULL DEFAULT '[]'")
             self._add_column("checks", "executed", "INTEGER NOT NULL DEFAULT 0")
+            self._add_column("checks", "workdir", "TEXT")
             self._write(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     def _add_column(self, table: str, column: str, definition: str) -> None:
@@ -688,11 +689,11 @@ class BranchRepository:
             self._require_record("artifacts", "artifact_id", check.artifact_id, run_id, "artifact")
             self._write(
                 """INSERT INTO checks(check_id, run_id, branch_id, name, kind, passed, invariant,
-                   command, exit_code, artifact_id, details, executed, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   command, exit_code, artifact_id, details, executed, workdir, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (check.id, run_id, check.branch_id, check.name, check.kind, int(check.passed),
                  check.invariant, check.command, check.exit_code, check.artifact_id, check.details,
-                 int(check.executed), _now()),
+                 int(check.executed), check.workdir, _now()),
             )
             self._event(run_id, "CHECK_RECORDED", asdict(check), stage=branch["stage"], branch_id=check.branch_id)
 

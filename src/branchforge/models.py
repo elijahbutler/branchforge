@@ -152,6 +152,8 @@ class Check:
     details: str = ""
     # True when the server ran the command itself, False when a caller reported the result.
     executed: bool = False
+    # Where an executed check ran, so a reader can confirm it tested this branch's work.
+    workdir: str | None = None
     id: str = field(default_factory=lambda: new_id("check"))
 
 

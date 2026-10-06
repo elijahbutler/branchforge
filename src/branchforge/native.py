@@ -29,6 +29,8 @@ from .store import EventStore
 
 CHECKS_FILE_FLAG = "BRANCHFORGE_CHECKS_FILE"
 LOG_TAIL = 600
+MAX_TIMEOUT_SECONDS = 3600
+MAX_LOG_BYTES = 1024 * 1024
 
 
 def _allowed_checks(project: Path) -> dict[str, dict[str, Any]]:
@@ -36,7 +38,9 @@ def _allowed_checks(project: Path) -> dict[str, dict[str, Any]]:
 
     They come from a file the user names in the server's environment, never
     from a tool argument or the project's own state, so an agent cannot author
-    or alter what gets executed.
+    or alter what gets executed. The file also lists the projects it applies
+    to: `project` arrives as a tool argument, so it is trusted only when the
+    user's file names it.
     """
     location = os.environ.get(CHECKS_FILE_FLAG)
     if not location:
@@ -46,15 +50,25 @@ def _allowed_checks(project: Path) -> dict[str, dict[str, Any]]:
             "environment. Until then, run the command yourself and report the result with check_record"
         )
     path = Path(location).expanduser().resolve()
-    if path.is_relative_to(project):
-        raise ValueError(f"{CHECKS_FILE_FLAG} must point outside the project, where project edits cannot change it: {path}")
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise ValueError(f"Cannot read the checks file {path}: {exc}") from exc
     checks = data.get("checks") if isinstance(data, dict) else None
-    if not isinstance(checks, dict):
-        raise ValueError('The checks file must look like {"checks": {"<name>": {"command": ["program", "arg"]}}}')
+    listed = data.get("projects") if isinstance(data, dict) else None
+    if not isinstance(checks, dict) or not isinstance(listed, list) or not all(isinstance(item, str) for item in listed):
+        raise ValueError(
+            'The checks file must look like {"projects": ["/absolute/project/path"], '
+            '"checks": {"<name>": {"command": ["program", "arg"]}}}'
+        )
+    projects = [Path(item).expanduser().resolve() for item in listed]
+    if any(path.is_relative_to(root) for root in projects):
+        raise ValueError(f"{CHECKS_FILE_FLAG} must point outside the project, where project edits cannot change it: {path}")
+    if project not in projects:
+        raise ValueError(
+            f"The checks file does not list this project: {project}. "
+            'The user adds its path under "projects" to allow checks to run there'
+        )
     allowed: dict[str, dict[str, Any]] = {}
     for name, spec in checks.items():
         command = spec.get("command") if isinstance(spec, dict) else None
@@ -84,13 +98,18 @@ def _run_command(argv: list[str], directory: Path, timeout: float) -> tuple[int 
         return None, output, True
 
 
-def _git_common_dir(directory: Path) -> Path | None:
+def _git_worktrees(project: Path) -> set[Path]:
+    """The project's own worktrees, asked of the trusted project and never of a caller-named directory."""
     result = subprocess.run(
-        ["git", "-C", str(directory), "rev-parse", "--git-common-dir"], capture_output=True, text=True,
+        ["git", "-C", str(project), "worktree", "list", "--porcelain"], capture_output=True, text=True,
     )
     if result.returncode != 0:
-        return None
-    return (directory / result.stdout.strip()).resolve()
+        return set()
+    return {
+        Path(line.removeprefix("worktree ")).resolve()
+        for line in result.stdout.splitlines()
+        if line.startswith("worktree ")
+    }
 
 
 def _choice(value: str, allowed: list[str], name: str) -> str:
@@ -424,8 +443,8 @@ class BranchForgeTools:
     ) -> dict[str, Any]:
         """Run a check the user allowed and the stage referenced, and record what it did. Exit code 0 passes."""
         allowed = _allowed_checks(self.cwd)
-        if timeout_seconds <= 0:
-            raise ValueError("timeout_seconds must be positive")
+        if not 0 < timeout_seconds <= MAX_TIMEOUT_SECONDS:
+            raise ValueError(f"timeout_seconds must be positive and at most {MAX_TIMEOUT_SECONDS}")
         with self._repository() as repository:
             branch = self._require_branch(repository, run_id, branch_id)
             if branch["status"] not in {BranchStatus.ADMITTED.value, BranchStatus.RUNNING.value, BranchStatus.EXPLORED.value}:
@@ -447,11 +466,13 @@ class BranchForgeTools:
         tail = output.decode(errors="replace")[-LOG_TAIL:].strip()
         with self._repository() as repository:
             with repository.store.atomic():
-                artifact = repository.store_artifact(run_id, branch_id, output, role="check-log", media_type="text/plain")
+                artifact = repository.store_artifact(
+                    run_id, branch_id, output[-MAX_LOG_BYTES:], role="check-log", media_type="text/plain",
+                )
                 check = Check(
                     branch_id, name, exit_code == 0 and not timed_out, kind=allowed[name]["kind"],
                     invariant=declared[name].get("invariant"), command=shlex.join(argv), exit_code=exit_code,
-                    artifact_id=artifact.id, executed=True,
+                    artifact_id=artifact.id, executed=True, workdir=str(directory),
                     details=f"timed out after {timeout_seconds:g}s\n{tail}".strip() if timed_out else tail,
                 )
                 repository.record_check(run_id, check)
@@ -466,8 +487,7 @@ class BranchForgeTools:
             raise ValueError(f"Not a directory: {directory}")
         if directory.is_relative_to(self.cwd):
             return directory
-        common = _git_common_dir(self.cwd)
-        if common is not None and _git_common_dir(directory) == common:
+        if any(directory.is_relative_to(worktree) for worktree in _git_worktrees(self.cwd)):
             return directory
         raise ValueError("workdir must be inside the project or a git worktree of the project repository")
 

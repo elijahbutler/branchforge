@@ -38,7 +38,7 @@ Skills describe the workflow. These rules do not depend on an agent following th
 - **A stage commit is all or nothing.** Pruning the losers, committing the winner, recording the decision, and closing the stage happen in one transaction.
 - **Admission has a budget.** A stage round admits at most `max_branches` branches, rounds stop at `max_rounds`, and two admitted branches in a round cannot share a title.
 - **A failed check blocks verification.** The latest `check_record` result for each invariant decides. A verifier cannot mark a branch verified over a failed invariant check.
-- **Only user-allowed commands are run.** The user lists named check commands in a JSON file outside the project and points `BRANCHFORGE_CHECKS_FILE` at it. A stage references checks by name and cannot supply a command. `check_run` reads the command from that file at run time, runs it without a shell in the branch's directory, stores the log as an artifact, and records pass or fail from the exit code. For an invariant with a referenced check, a reported result is refused.
+- **Only user-allowed commands are run.** The user lists named check commands, and the projects they apply to, in a JSON file outside those projects and points `BRANCHFORGE_CHECKS_FILE` at it. The `cwd` tool argument is honored for checks only when the file lists it. A stage references checks by name and cannot supply a command. `check_run` reads the command from that file at run time, runs it without a shell in the branch's directory, stores the log as an artifact, and records pass or fail from the exit code. For an invariant with a referenced check, a reported result is refused.
 - **Observed stages need passing checks.** With `evidence_policy` `observed`, the default for software stages, a branch verifies only after a passing check for every invariant.
 - **Scores follow the rubric.** `branch_verify` accepts a 0 to 1 score per rubric criterion and applies the stage weights itself.
 - **References must exist.** Evidence, findings, and checks cannot cite a claim, evidence record, or artifact that is not in the run.
@@ -124,6 +124,8 @@ Artifacts are stored by SHA-256 under `.branchforge/objects`. Dossiers are rende
 
 - Check execution is off by default. Without it the host runs the command and reports the outcome through `check_record`, so a check is only as honest as the agent recording it.
 - `check_run` runs the command with the server's own permissions and environment, not in a sandbox. An allowed command such as a test runner executes code from the branch's directory, which the agent wrote. Allow only commands you would let the agent run anyway.
+- The agent chooses the directory a check runs in, within the project and its worktrees. A check can therefore pass against a directory that does not hold the branch's work. Each executed check records its directory, and the dossier prints it, so a reviewer can tell.
+- The check's output is stored as an artifact in the project. A command that prints secrets from the environment leaves them there.
 - An agent with unrestricted shell access could edit the checks file itself. The file's protection is the host's permission prompt for writes outside the project.
 - The headless kernel cannot execute anything, so its stages are always `judged`.
 - The event log is an audit trail. State is not rebuilt from it.
