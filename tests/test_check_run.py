@@ -32,9 +32,10 @@ class CheckRunCase(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    def allow(self, command, projects=None, **extra):
+    def allow(self, command, projects=None, worktree_roots=(), **extra):
         self.checks_file.write_text(json.dumps({
             "projects": [str(self.root)] if projects is None else projects,
+            "worktree_roots": list(worktree_roots),
             "checks": {"isolation": {"command": command, **extra}},
         }))
 
@@ -189,17 +190,37 @@ class ExecutedCheckTests(CheckRunCase):
             with self.assertRaisesRegex(ValueError, "git worktree of the project"):
                 self.tools.check_run(self.run_id, branch_id, "isolation", workdir=outside)
 
-    def test_git_worktree_of_the_project_is_accepted(self):
+    def worktree(self, parent):
         git = ["git", "-c", "user.name=t", "-c", "user.email=t@example.com", "-C", str(self.root)]
         subprocess.run([*git, "init", "-q"], check=True)
         subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", "init"], check=True)
+        path = Path(parent).resolve() / "candidate"
+        subprocess.run([*git, "worktree", "add", "-q", str(path)], check=True, capture_output=True)
+        return path
+
+    def test_git_worktree_under_a_root_the_user_listed_is_accepted(self):
         with tempfile.TemporaryDirectory() as parent:
-            worktree = Path(parent) / "candidate"
-            subprocess.run([*git, "worktree", "add", "-q", str(worktree)], check=True, capture_output=True)
+            worktree = self.worktree(parent)
+            self.allow(PASSING, worktree_roots=[str(Path(parent).resolve())])
             self.stage()
-            branch_id = self.explored()
-            check = self.tools.check_run(self.run_id, branch_id, "isolation", workdir=str(worktree))
+            check = self.tools.check_run(self.run_id, self.explored(), "isolation", workdir=str(worktree))
             self.assertTrue(check["passed"])
+            self.assertEqual(check["workdir"], str(worktree))
+
+    def test_git_worktree_outside_the_listed_roots_is_refused(self):
+        # Worktree registrations live in the repository, which the agent can write.
+        with tempfile.TemporaryDirectory() as parent:
+            worktree = self.worktree(parent)
+            self.stage()
+            with self.assertRaisesRegex(ValueError, "worktree root"):
+                self.tools.check_run(self.run_id, self.explored(), "isolation", workdir=str(worktree))
+
+    def test_directory_under_a_listed_root_that_is_not_a_worktree_is_refused(self):
+        with tempfile.TemporaryDirectory() as parent:
+            self.allow(PASSING, worktree_roots=[str(Path(parent).resolve())])
+            self.stage()
+            with self.assertRaisesRegex(ValueError, "git worktree of the project"):
+                self.tools.check_run(self.run_id, self.explored(), "isolation", workdir=parent)
 
     def test_declared_check_must_name_a_stage_invariant(self):
         with self.assertRaisesRegex(ValueError, "Tenant isolation"):
