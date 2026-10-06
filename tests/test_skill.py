@@ -72,6 +72,29 @@ class SkillPackageTests(unittest.TestCase):
         self.assertIn('"$server" --help', installer)
         self.assertFalse((ROOT / ".mcp.json").exists())
 
+    def install_skills(self, home, *flags):
+        return subprocess.run(
+            ["bash", str(ROOT / "scripts" / "install-skill.sh"), "--claude", *flags],
+            env={"HOME": str(home), "PATH": "/usr/bin:/bin"}, capture_output=True, text=True,
+        )
+
+    def test_skill_installer_can_be_rerun_without_force(self):
+        with tempfile.TemporaryDirectory() as home:
+            self.assertEqual(self.install_skills(home).returncode, 0)
+            second = self.install_skills(home)
+            self.assertEqual(second.returncode, 0, second.stderr)
+            link = Path(home) / ".claude" / "skills" / "branchforge"
+            self.assertEqual(link.resolve(), (ROOT / "skills" / "branchforge").resolve())
+
+    def test_skill_installer_still_protects_a_foreign_skill(self):
+        with tempfile.TemporaryDirectory() as home:
+            foreign = Path(home) / ".claude" / "skills" / "branchforge"
+            foreign.mkdir(parents=True)
+            (foreign / "SKILL.md").write_text("someone else's skill")
+            result = self.install_skills(home)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual((foreign / "SKILL.md").read_text(), "someone else's skill")
+
     def test_desktop_installer_preserves_existing_configuration(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

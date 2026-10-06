@@ -42,7 +42,42 @@ The installer:
 3. Installs the BranchForge skill suite.
 4. Registers the MCP server using the absolute `.venv/bin/branchforge` path.
 
+The installer registers every requested host it finds and skips the rest, so `--all` works with only one of Codex and Claude installed. It can be rerun without `--force`; use `--force` only to replace a skill of the same name that came from elsewhere.
+
 Restart the agent host or open a new task after installation.
+
+## Let BranchForge Run Check Commands
+
+By default BranchForge records check results that the agent reports. To have it run checks itself, list the commands you allow in a JSON file outside the project:
+
+```json
+{
+  "checks": {
+    "unit": {"command": ["pytest", "-q"]},
+    "types": {"command": ["mypy", "src"], "kind": "static_analysis"}
+  }
+}
+```
+
+Then point the MCP server at it:
+
+```bash
+claude mcp remove branchforge -s user
+claude mcp add -s user branchforge -e BRANCHFORGE_CHECKS_FILE="$HOME/.config/branchforge/checks.json" -- "$PWD/.venv/bin/branchforge" mcp
+```
+
+An agent can reference these checks by name and cannot supply or change a command. BranchForge refuses a checks file inside the project. Commands run without a shell, with your user's permissions, in the project directory or one of its git worktrees. A test runner still executes the code the agent wrote, so allow only commands you would let the agent run.
+
+## Install As A Claude Code Plugin
+
+The repository is also a Claude Code plugin marketplace. The plugin starts the server with `uvx` from the plugin directory, so it needs [uv](https://docs.astral.sh/uv/) on PATH and nothing else:
+
+```bash
+claude plugin marketplace add elijahbutler/branchforge
+claude plugin install branchforge@branchforge
+```
+
+The Codex plugin under `plugins/branchforge` expects a `branchforge` command on PATH.
 
 ## Verify Installation
 
@@ -83,6 +118,8 @@ The configured command should end with:
 ```text
 .venv/bin/branchforge mcp
 ```
+
+The CLI lives in the checkout's `.venv`. Run it as `.venv/bin/branchforge`, or add that directory to PATH.
 
 ## Claude Desktop Notes
 

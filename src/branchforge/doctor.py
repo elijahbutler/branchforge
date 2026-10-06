@@ -22,7 +22,43 @@ def _module_available(name: str) -> bool:
     return importlib.util.find_spec(name) is not None
 
 
-def run_doctor(host: str = "local", *, home: str | Path | None = None) -> dict[str, Any]:
+def _desktop_config(root: Path, platform: str) -> Path | None:
+    if platform == "darwin":
+        return root / "Library" / "Application Support" / "Claude" / "claude_desktop_config.json"
+    if platform == "win32":
+        return root / "AppData" / "Roaming" / "Claude" / "claude_desktop_config.json"
+    return None
+
+
+def _desktop_check(config: Path | None) -> dict[str, str]:
+    name = "claude_desktop_config"
+    installer = "Run scripts/install-agent.sh --claude."
+    if config is None:
+        return _check(name, "error", "Claude Desktop is supported on macOS and Windows.", "Use --host claude for Claude Code.")
+    if not config.exists():
+        return _check(name, "error", f"Config file not found: {config}", installer)
+    try:
+        data = json.loads(config.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        return _check(name, "error", f"Claude Desktop config is not valid JSON: {exc}", "Fix the JSON file, then rerun the installer.")
+    servers = data.get("mcpServers") if isinstance(data, dict) else None
+    if not isinstance(servers, dict):
+        return _check(name, "error", f"Claude Desktop config must be a JSON object with an mcpServers object: {config}", installer)
+    server = servers.get("branchforge")
+    if not isinstance(server, dict) or not server.get("command"):
+        return _check(name, "error", "Claude Desktop config does not include a branchforge MCP server.", installer)
+    command = str(server["command"])
+    if not Path(command).is_file() and shutil.which(command) is None:
+        return _check(name, "error", f"Configured command does not exist: {command}", installer)
+    return _check(name, "ok", f"BranchForge MCP server is configured: {command}")
+
+
+def run_doctor(
+    host: str = "local",
+    *,
+    home: str | Path | None = None,
+    platform: str | None = None,
+) -> dict[str, Any]:
     if host not in HOSTS:
         raise ValueError(f"host must be one of: {', '.join(sorted(HOSTS))}")
 
@@ -81,35 +117,8 @@ def run_doctor(host: str = "local", *, home: str | Path | None = None) -> dict[s
         ))
 
     if host == "claude-desktop":
-        root = Path(home) if home else Path.home()
-        config = root / "Library" / "Application Support" / "Claude" / "claude_desktop_config.json"
-        if not config.exists():
-            checks.append(_check(
-                "claude_desktop_config",
-                "error",
-                f"Config file not found: {config}",
-                "Run scripts/install-agent.sh --claude --force or install the Desktop connector.",
-            ))
-        else:
-            try:
-                data = json.loads(config.read_text())
-                server = data.get("mcpServers", {}).get("branchforge")
-                if server:
-                    checks.append(_check("claude_desktop_config", "ok", "BranchForge MCP server is configured."))
-                else:
-                    checks.append(_check(
-                        "claude_desktop_config",
-                        "error",
-                        "Claude Desktop config does not include a branchforge MCP server.",
-                        "Run scripts/install-agent.sh --claude --force.",
-                    ))
-            except json.JSONDecodeError as exc:
-                checks.append(_check(
-                    "claude_desktop_config",
-                    "error",
-                    f"Claude Desktop config is not valid JSON: {exc}",
-                    "Fix the JSON file, then rerun the installer.",
-                ))
+        config = _desktop_config(Path(home) if home else Path.home(), platform or sys.platform)
+        checks.append(_desktop_check(config))
 
     return {
         "host": host,

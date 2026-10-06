@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+import json
+import os
+import shlex
+import signal
+import subprocess
 from contextlib import contextmanager
 from dataclasses import asdict
 from pathlib import Path
@@ -9,6 +14,7 @@ from .models import (
     BranchMode,
     BranchResult,
     BranchStatus,
+    Check,
     Claim,
     Evidence,
     Finding,
@@ -21,8 +27,85 @@ from .repository import BranchRepository
 from .store import EventStore
 
 
+CHECKS_FILE_FLAG = "BRANCHFORGE_CHECKS_FILE"
+LOG_TAIL = 600
+
+
+def _allowed_checks(project: Path) -> dict[str, dict[str, Any]]:
+    """Load the commands the user allows the server to run.
+
+    They come from a file the user names in the server's environment, never
+    from a tool argument or the project's own state, so an agent cannot author
+    or alter what gets executed.
+    """
+    location = os.environ.get(CHECKS_FILE_FLAG)
+    if not location:
+        raise ValueError(
+            "Running check commands is off. The user enables it by listing allowed commands in a JSON file "
+            f"outside the project and setting {CHECKS_FILE_FLAG} to its path in the BranchForge MCP server's "
+            "environment. Until then, run the command yourself and report the result with check_record"
+        )
+    path = Path(location).expanduser().resolve()
+    if path.is_relative_to(project):
+        raise ValueError(f"{CHECKS_FILE_FLAG} must point outside the project, where project edits cannot change it: {path}")
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"Cannot read the checks file {path}: {exc}") from exc
+    checks = data.get("checks") if isinstance(data, dict) else None
+    if not isinstance(checks, dict):
+        raise ValueError('The checks file must look like {"checks": {"<name>": {"command": ["program", "arg"]}}}')
+    allowed: dict[str, dict[str, Any]] = {}
+    for name, spec in checks.items():
+        command = spec.get("command") if isinstance(spec, dict) else None
+        argv = shlex.split(command) if isinstance(command, str) else command
+        if not isinstance(argv, list) or not argv or not all(isinstance(item, str) for item in argv):
+            raise ValueError(f"Check {name!r} in the checks file needs a command")
+        allowed[name] = {"command": argv, "kind": spec.get("kind", "test")}
+    return allowed
+
+
+def _run_command(argv: list[str], directory: Path, timeout: float) -> tuple[int | None, bytes, bool]:
+    """Run an allowed check without a shell. Returns exit code, combined output, and whether it timed out."""
+    process = subprocess.Popen(
+        argv, cwd=directory, stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, start_new_session=True,
+    )
+    try:
+        output, _ = process.communicate(timeout=timeout)
+        return process.returncode, output, False
+    except subprocess.TimeoutExpired:
+        # Kill the whole process group so a test runner's children do not outlive it.
+        if hasattr(os, "killpg"):
+            os.killpg(process.pid, signal.SIGKILL)
+        else:
+            process.kill()
+        output, _ = process.communicate()
+        return None, output, True
+
+
+def _git_common_dir(directory: Path) -> Path | None:
+    result = subprocess.run(
+        ["git", "-C", str(directory), "rev-parse", "--git-common-dir"], capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        return None
+    return (directory / result.stdout.strip()).resolve()
+
+
+def _choice(value: str, allowed: list[str], name: str) -> str:
+    if value not in allowed:
+        raise ValueError(f"{name} must be one of: {', '.join(allowed)} (got {value!r})")
+    return value
+
+
 class BranchForgeTools:
-    """Deterministic operations exposed to an agent-native tool protocol."""
+    """Deterministic operations exposed to an agent-native tool protocol.
+
+    Lifecycle rules live in BranchRepository. This layer resolves the project
+    directory, validates input shape, and keeps responses small enough to sit
+    in an agent's context.
+    """
 
     def __init__(self, cwd: str | Path | None = None):
         self.cwd = Path(cwd or Path.cwd()).resolve()
@@ -37,6 +120,26 @@ class BranchForgeTools:
             yield BranchRepository(store, self.state_dir)
         finally:
             store.close()
+
+    @staticmethod
+    def _summary(repository: BranchRepository, branch: dict[str, Any]) -> dict[str, Any]:
+        """The fields an orchestrator needs to choose its next action."""
+        checks = repository.checks(branch["branch_id"])
+        summary = {
+            "branch_id": branch["branch_id"],
+            "stage": branch["stage"],
+            "round": branch["round"],
+            "parent_id": branch["parent_id"],
+            "title": branch["title"],
+            "status": branch["status"],
+            "confidence": branch["confidence"],
+            "score": round(sum(branch["scores"].values()), 4),
+            "checks_passed": sum(check["passed"] for check in checks),
+            "checks_failed": sum(not check["passed"] for check in checks),
+        }
+        if branch["rejection_reason"]:
+            summary["rejection_reason"] = branch["rejection_reason"]
+        return summary
 
     def run_create(
         self,
@@ -63,7 +166,7 @@ class BranchForgeTools:
         with self._repository() as repository:
             run = repository.get_run(run_id)
             if run is None:
-                raise KeyError(f"Unknown run: {run_id}")
+                raise ValueError(f"Unknown run: {run_id}")
             return {"run": run, "stages": repository.stages(run_id)}
 
     def run_status(self, run_id: str | None = None) -> dict[str, Any]:
@@ -84,13 +187,6 @@ class BranchForgeTools:
 
     def run_finish(self, run_id: str, *, error: str | None = None) -> dict[str, Any]:
         with self._repository() as repository:
-            run = repository.get_run(run_id)
-            if run is None:
-                raise KeyError(f"Unknown run: {run_id}")
-            if not error:
-                incomplete = [stage["name"] for stage in repository.stages(run_id) if stage["status"] != "committed"]
-                if incomplete:
-                    raise ValueError(f"Cannot complete run with unfinished stages: {incomplete}")
             repository.finish_run(run_id, error=error)
             output = repository.render_run(run_id)
             return {"run": repository.get_run(run_id), "dossier_path": str(output)}
@@ -105,7 +201,22 @@ class BranchForgeTools:
         deliverable: str = "A verified recommendation",
         invariants: list[str] | None = None,
         rubric: dict[str, float] | None = None,
+        evidence_policy: str | None = None,
+        checks: list[dict[str, str]] | None = None,
     ) -> dict[str, Any]:
+        _choice(mode, [item.value for item in BranchMode], "mode")
+        references: list[dict[str, str]] = []
+        if checks:
+            allowed = _allowed_checks(self.cwd)
+            for item in checks:
+                if "command" in item:
+                    raise ValueError(
+                        "A stage cannot supply a command. Reference a check by name; "
+                        "the command comes from the user's checks file"
+                    )
+                if item.get("name") not in allowed:
+                    raise ValueError(f"Unknown check {item.get('name')!r}. Allowed checks: {', '.join(allowed) or 'none'}")
+                references.append({key: item[key] for key in ("name", "invariant") if item.get(key)})
         stage = StageSpec(
             name=name,
             objective=objective,
@@ -113,12 +224,15 @@ class BranchForgeTools:
             invariants=invariants or [],
             mode=BranchMode(mode),
             rubric=rubric or StageSpec(name, objective).rubric,
+            # Software branches can run their checks, so they must show the results.
+            evidence_policy=evidence_policy or ("observed" if mode == BranchMode.SOFTWARE.value else "judged"),
+            checks=references,
         )
         if not stage.rubric or any(weight < 0 for weight in stage.rubric.values()):
             raise ValueError("Rubric weights must be non-negative")
         with self._repository() as repository:
             repository.create_stage(run_id, stage)
-            return next(item for item in repository.stages(run_id) if item["name"] == name)
+            return repository.get_stage(run_id, name) or {}
 
     def stage_commit(
         self,
@@ -130,44 +244,10 @@ class BranchForgeTools:
         *,
         votes: dict[str, int] | None = None,
     ) -> dict[str, Any]:
-        if not 0 <= confidence <= 1:
-            raise ValueError("confidence must be between 0 and 1")
         with self._repository() as repository:
-            winner = repository.get_branch(winner_id)
-            if winner is None or winner["run_id"] != run_id or winner["stage"] != stage:
-                raise ValueError("Winner does not belong to the requested run and stage")
-            if winner["status"] != BranchStatus.VERIFIED.value:
-                raise ValueError("Only a verified branch can be committed")
-            stage_branches = [
-                branch for branch in repository.branches(run_id) if branch["stage"] == stage
-            ]
-            unfinished = [
-                branch["branch_id"]
-                for branch in stage_branches
-                if branch["status"] in {
-                    BranchStatus.PROPOSED.value,
-                    BranchStatus.ADMITTED.value,
-                    BranchStatus.RUNNING.value,
-                }
-            ]
-            if unfinished:
-                raise ValueError(
-                    "Cannot commit a stage with unfinished branches; record a result, "
-                    f"failure, or prune them first: {unfinished}"
-                )
-            for branch in stage_branches:
-                if branch["branch_id"] == winner_id:
-                    continue
-                if branch["status"] in {BranchStatus.EXPLORED.value, BranchStatus.VERIFIED.value}:
-                    repository.transition(run_id, branch["branch_id"], BranchStatus.PRUNED, reason="Not selected at stage collapse")
-            repository.transition(run_id, winner_id, BranchStatus.COMMITTED)
-            repository.record_finding(
-                run_id,
-                Finding(winner_id, f"Committed for stage {stage}: {rationale}", kind="decision"),
-            )
-            repository.finish_stage(run_id, stage, winner_id, rationale, confidence, votes or {})
+            repository.commit_stage(run_id, stage, winner_id, rationale, confidence, votes)
             repository.render_run(run_id)
-            return next(item for item in repository.stages(run_id) if item["name"] == stage)
+            return repository.get_stage(run_id, stage) or {}
 
     def branch_add(
         self,
@@ -186,12 +266,12 @@ class BranchForgeTools:
     ) -> dict[str, Any]:
         if not 0 <= novelty <= 1:
             raise ValueError("novelty must be between 0 and 1")
+        if round_number < 0:
+            raise ValueError("round_number starts at 0")
         with self._repository() as repository:
-            stage_record = next((item for item in repository.stages(run_id) if item["name"] == stage), None)
+            stage_record = repository.get_stage(run_id, stage)
             if stage_record is None:
                 raise ValueError(f"Unknown stage: {stage}")
-            if stage_record["status"] != "running":
-                raise ValueError(f"Stage is not running: {stage}")
             hypothesis = Hypothesis(
                 title=title,
                 claim=claim,
@@ -202,36 +282,47 @@ class BranchForgeTools:
                 parent_id=parent_id,
                 round=round_number,
             )
-            repository.create_branch(run_id, stage, hypothesis, BranchMode(stage_record["mode"]))
-            repository.transition(
-                run_id,
-                hypothesis.id,
-                BranchStatus.ADMITTED if admit else BranchStatus.PRUNED,
-                reason=None if admit else "Rejected at admission",
-            )
-            return repository.get_branch(hypothesis.id) or {}
+            with repository.store.atomic():
+                repository.create_branch(run_id, stage, hypothesis, BranchMode(stage_record["mode"]))
+                repository.transition(
+                    run_id,
+                    hypothesis.id,
+                    BranchStatus.ADMITTED if admit else BranchStatus.PRUNED,
+                    reason=None if admit else "Rejected at admission",
+                )
+            return self._summary(repository, repository.get_branch(hypothesis.id) or {})
 
     def branch_view(self, branch_id: str) -> dict[str, Any]:
         with self._repository() as repository:
             branch = repository.get_branch(branch_id)
             if branch is None:
-                raise KeyError(f"Unknown branch: {branch_id}")
-            return branch
+                raise ValueError(f"Unknown branch: {branch_id}")
+            return {**branch, "checks": repository.checks(branch_id)}
 
-    def branch_list(self, run_id: str, *, stage: str | None = None, status: str | None = None) -> list[dict[str, Any]]:
+    def branch_list(
+        self,
+        run_id: str,
+        *,
+        stage: str | None = None,
+        status: str | None = None,
+        detail: bool = False,
+    ) -> list[dict[str, Any]]:
+        if status:
+            _choice(status, [item.value for item in BranchStatus], "status")
         with self._repository() as repository:
+            if repository.get_run(run_id) is None:
+                raise ValueError(f"Unknown run: {run_id}")
             branches = repository.branches(run_id)
             if stage:
                 branches = [branch for branch in branches if branch["stage"] == stage]
             if status:
-                BranchStatus(status)
                 branches = [branch for branch in branches if branch["status"] == status]
-            return branches
+            return branches if detail else [self._summary(repository, branch) for branch in branches]
 
     def branch_start(self, run_id: str, branch_id: str) -> dict[str, Any]:
         with self._repository() as repository:
             repository.transition(run_id, branch_id, BranchStatus.RUNNING)
-            return repository.get_branch(branch_id) or {}
+            return self._summary(repository, repository.get_branch(branch_id) or {})
 
     def branch_record_result(
         self,
@@ -242,27 +333,23 @@ class BranchForgeTools:
         evidence: list[str] | None = None,
         risks: list[str] | None = None,
         confidence: float = 0.5,
-        artifacts: list[str] | None = None,
     ) -> dict[str, Any]:
         if not 0 <= confidence <= 1:
             raise ValueError("confidence must be between 0 and 1")
         with self._repository() as repository:
-            branch = repository.get_branch(branch_id)
-            if branch is None or branch["run_id"] != run_id:
-                raise ValueError("Branch does not belong to run")
-            if branch["status"] == BranchStatus.ADMITTED.value:
-                repository.transition(run_id, branch_id, BranchStatus.RUNNING)
-                branch = repository.get_branch(branch_id) or branch
-            if branch["status"] != BranchStatus.RUNNING.value:
-                raise ValueError("Branch must be admitted or running to record a result")
-            result = BranchResult(
-                self._hypothesis(branch), proposal, evidence or [], risks or [], confidence,
-                artifacts=artifacts or [],
-            )
-            repository.record_result(run_id, result)
-            repository.transition(run_id, branch_id, BranchStatus.EXPLORED)
+            with repository.store.atomic():
+                branch = self._require_branch(repository, run_id, branch_id)
+                if branch["status"] == BranchStatus.ADMITTED.value:
+                    repository.transition(run_id, branch_id, BranchStatus.RUNNING)
+                elif branch["status"] != BranchStatus.RUNNING.value:
+                    raise ValueError(
+                        f"Branch is {branch['status']}; a result can be recorded only while it is admitted or running"
+                    )
+                result = BranchResult(self._hypothesis(branch), proposal, evidence or [], risks or [], confidence)
+                repository.record_result(run_id, result)
+                repository.transition(run_id, branch_id, BranchStatus.EXPLORED)
             repository.render_branch(branch_id)
-            return repository.get_branch(branch_id) or {}
+            return self._summary(repository, repository.get_branch(branch_id) or {})
 
     def branch_verify(
         self,
@@ -274,20 +361,9 @@ class BranchForgeTools:
         notes: list[str] | None = None,
     ) -> dict[str, Any]:
         with self._repository() as repository:
-            branch = repository.get_branch(branch_id)
-            if branch is None or branch["run_id"] != run_id:
-                raise ValueError("Branch does not belong to run")
-            if branch["status"] != BranchStatus.EXPLORED.value:
-                raise ValueError("Branch must be explored before verification")
-            result = BranchResult(
-                self._hypothesis(branch), branch.get("proposal") or "", [], branch["risks"],
-                branch.get("confidence") or 0.0, scores=scores or {}, verified=verified,
-            )
-            repository.record_verification(run_id, result, notes or [])
-            if verified:
-                repository.transition(run_id, branch_id, BranchStatus.VERIFIED)
+            repository.verify_branch(run_id, branch_id, verified=verified, scores=scores, notes=notes)
             repository.render_branch(branch_id)
-            return repository.get_branch(branch_id) or {}
+            return self._summary(repository, repository.get_branch(branch_id) or {})
 
     def branch_prune(self, run_id: str, branch_id: str, reason: str) -> dict[str, Any]:
         if not reason.strip():
@@ -295,34 +371,109 @@ class BranchForgeTools:
         with self._repository() as repository:
             repository.transition(run_id, branch_id, BranchStatus.PRUNED, reason=reason)
             repository.render_branch(branch_id)
-            return repository.get_branch(branch_id) or {}
+            return self._summary(repository, repository.get_branch(branch_id) or {})
 
     def branch_fail(self, run_id: str, branch_id: str, reason: str) -> dict[str, Any]:
         """Record a terminal explorer failure without inventing a result."""
         if not reason.strip():
             raise ValueError("A failure reason is required")
         with self._repository() as repository:
-            branch = self._require_branch(repository, run_id, branch_id)
-            if branch["status"] == BranchStatus.ADMITTED.value:
-                repository.transition(run_id, branch_id, BranchStatus.RUNNING)
-                branch = repository.get_branch(branch_id) or branch
-            if branch["status"] not in {
-                BranchStatus.RUNNING.value,
-                BranchStatus.EXPLORED.value,
-            }:
-                raise ValueError("Only admitted, running, or explored branches can fail")
-            repository.transition(run_id, branch_id, BranchStatus.FAILED, reason=reason)
-            repository.record_finding(
-                run_id,
-                Finding(branch_id, reason, kind="failure"),
-            )
+            with repository.store.atomic():
+                branch = self._require_branch(repository, run_id, branch_id)
+                if branch["status"] == BranchStatus.ADMITTED.value:
+                    repository.transition(run_id, branch_id, BranchStatus.RUNNING)
+                elif branch["status"] not in {BranchStatus.RUNNING.value, BranchStatus.EXPLORED.value}:
+                    raise ValueError("Only admitted, running, or explored branches can fail")
+                repository.transition(run_id, branch_id, BranchStatus.FAILED, reason=reason)
+                repository.record_finding(run_id, Finding(branch_id, reason, kind="failure"))
             repository.render_branch(branch_id)
-            return repository.get_branch(branch_id) or {}
+            return self._summary(repository, repository.get_branch(branch_id) or {})
+
+    def check_record(
+        self,
+        run_id: str,
+        branch_id: str,
+        name: str,
+        passed: bool,
+        *,
+        kind: str = "test",
+        invariant: str | None = None,
+        command: str | None = None,
+        exit_code: int | None = None,
+        artifact_id: str | None = None,
+        details: str = "",
+    ) -> dict[str, Any]:
+        """Record what a test, benchmark, or inspection showed. The caller ran it; this stores the result."""
+        check = Check(
+            branch_id, name, passed, kind=kind, invariant=invariant, command=command,
+            exit_code=exit_code, artifact_id=artifact_id, details=details,
+        )
+        with self._repository() as repository:
+            repository.record_check(run_id, check)
+            repository.render_branch(branch_id)
+            return asdict(check)
+
+    def check_run(
+        self,
+        run_id: str,
+        branch_id: str,
+        name: str,
+        *,
+        workdir: str | None = None,
+        timeout_seconds: float = 600.0,
+    ) -> dict[str, Any]:
+        """Run a check the user allowed and the stage referenced, and record what it did. Exit code 0 passes."""
+        allowed = _allowed_checks(self.cwd)
+        if timeout_seconds <= 0:
+            raise ValueError("timeout_seconds must be positive")
+        with self._repository() as repository:
+            branch = self._require_branch(repository, run_id, branch_id)
+            if branch["status"] not in {BranchStatus.ADMITTED.value, BranchStatus.RUNNING.value, BranchStatus.EXPLORED.value}:
+                raise ValueError(f"Branch is {branch['status']}; checks run before verification")
+            stage = repository.get_stage(run_id, branch["stage"]) or {}
+            declared = {item["name"]: item for item in stage.get("checks", [])}
+            if name not in declared:
+                raise ValueError(f"Unknown check {name!r}. Declared checks: {', '.join(declared) or 'none'}")
+        if name not in allowed:
+            raise ValueError(f"Check {name!r} is no longer in the checks file, so it cannot run")
+        # The command comes from the user's file at run time, never from stored state.
+        argv: list[str] = allowed[name]["command"]
+        directory = self._check_directory(workdir)
+        try:
+            # No database connection is held while the command runs.
+            exit_code, output, timed_out = _run_command(argv, directory, timeout_seconds)
+        except OSError as exc:
+            raise ValueError(f"Cannot start check {name!r}: {exc}") from exc
+        tail = output.decode(errors="replace")[-LOG_TAIL:].strip()
+        with self._repository() as repository:
+            with repository.store.atomic():
+                artifact = repository.store_artifact(run_id, branch_id, output, role="check-log", media_type="text/plain")
+                check = Check(
+                    branch_id, name, exit_code == 0 and not timed_out, kind=allowed[name]["kind"],
+                    invariant=declared[name].get("invariant"), command=shlex.join(argv), exit_code=exit_code,
+                    artifact_id=artifact.id, executed=True,
+                    details=f"timed out after {timeout_seconds:g}s\n{tail}".strip() if timed_out else tail,
+                )
+                repository.record_check(run_id, check)
+            repository.render_branch(branch_id)
+            return asdict(check)
+
+    def _check_directory(self, workdir: str | None) -> Path:
+        if not workdir:
+            return self.cwd
+        directory = (self.cwd / workdir).resolve()
+        if not directory.is_dir():
+            raise ValueError(f"Not a directory: {directory}")
+        if directory.is_relative_to(self.cwd):
+            return directory
+        common = _git_common_dir(self.cwd)
+        if common is not None and _git_common_dir(directory) == common:
+            return directory
+        raise ValueError("workdir must be inside the project or a git worktree of the project repository")
 
     def claim_record(self, run_id: str, branch_id: str, statement: str, *, kind: str = "claim", status: str = "open") -> dict[str, Any]:
         claim = Claim(branch_id, statement, kind=kind, status=status)
         with self._repository() as repository:
-            self._require_branch(repository, run_id, branch_id)
             repository.record_claim(run_id, claim)
             return asdict(claim)
 
@@ -343,7 +494,6 @@ class BranchForgeTools:
             artifact_id=artifact_id, observed=observed,
         )
         with self._repository() as repository:
-            self._require_branch(repository, run_id, branch_id)
             repository.record_evidence(run_id, evidence)
             return asdict(evidence)
 
@@ -362,7 +512,6 @@ class BranchForgeTools:
             revisit_if=revisit_if or [],
         )
         with self._repository() as repository:
-            self._require_branch(repository, run_id, branch_id)
             repository.record_finding(run_id, finding)
             return asdict(finding)
 
@@ -381,7 +530,6 @@ class BranchForgeTools:
         if not source.is_file():
             raise ValueError(f"Artifact is not a file: {source}")
         with self._repository() as repository:
-            self._require_branch(repository, run_id, branch_id)
             artifact = repository.store_artifact(
                 run_id, branch_id, source, role=role, media_type=media_type,
             )
@@ -389,17 +537,14 @@ class BranchForgeTools:
             return asdict(artifact)
 
     def tree_view(self, run_id: str, *, fmt: str = "compact") -> str | dict[str, Any]:
+        _choice(fmt, ["compact", "markdown", "json"], "fmt")
         with self._repository() as repository:
+            if repository.get_run(run_id) is None:
+                raise ValueError(f"Unknown run: {run_id}")
             tree = repository.tree(run_id)
             if fmt == "json":
-                return tree
-            if fmt == "markdown":
-                lines = [f"# Branch tree: {run_id}", ""]
-                self._render_tree(tree["roots"], lines, 0)
-                return "\n".join(lines)
-            if fmt != "compact":
-                raise ValueError("fmt must be compact, markdown, or json")
-            lines: list[str] = []
+                return {"run_id": run_id, "roots": [self._tree_node(repository, root) for root in tree["roots"]]}
+            lines = [f"# Branch tree: {run_id}", ""] if fmt == "markdown" else []
             self._render_tree(tree["roots"], lines, 0)
             return "\n".join(lines)
 
@@ -422,6 +567,13 @@ class BranchForgeTools:
             branch["predictions"], branch["falsifiers"], branch["novelty"],
             id=branch["branch_id"], parent_id=branch["parent_id"], round=branch["round"],
         )
+
+    @classmethod
+    def _tree_node(cls, repository: BranchRepository, branch: dict[str, Any]) -> dict[str, Any]:
+        return {
+            **cls._summary(repository, branch),
+            "children": [cls._tree_node(repository, child) for child in branch.get("children", [])],
+        }
 
     @classmethod
     def _render_tree(cls, branches: list[dict[str, Any]], lines: list[str], depth: int) -> None:

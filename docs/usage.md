@@ -61,6 +61,8 @@ branchforge tree run_123
 branchforge dossier run_123
 ```
 
+The CLI reads `.branchforge/state.db` in the current directory, the same file the MCP server writes, so `status`, `tree`, and `dossier` show agent-native runs. A `branchforge.db` left by an earlier release is still used when no `.branchforge/state.db` exists.
+
 Use a non-default database and workspace:
 
 ```bash

@@ -14,6 +14,14 @@ Directly from the checkout:
 PYTHONPATH=src python3 -m unittest discover -s tests -v
 ```
 
+The MCP server tests skip without the optional SDK. Run them too:
+
+```bash
+PYTHONPATH=src uv run --no-project --with 'mcp>=1.16,<2' python -m unittest discover -s tests -v
+```
+
+CI runs both configurations on Python 3.11 and 3.14.
+
 ## Validate Skills And Plugin
 
 ```bash

@@ -16,7 +16,7 @@ the host actually provides it.
 
 ## For each stage
 
-1. Call `stage_create` with objective, mode, deliverable, invariants, and rubric.
+1. Call `stage_create` with objective, mode, deliverable, invariants, and rubric. Write each invariant so a test, measurement, or inspection can decide it. Software stages default to `evidence_policy` `observed`. Set `observed` on any other stage whose invariants can be checked. When the user has allowed named check commands, reference the ones that decide an invariant in `checks` so BranchForge runs the same command against every branch. You cannot supply a command yourself. If `stage_create` answers that running commands is off or the name is unknown, omit `checks` and have explorers report results with `check_record`; do not ask the user to enable it unless they raise it.
 2. Generate two to four materially different, falsifiable hypotheses.
 3. Call `branch_add` for every candidate, including rejected admission candidates with `admit=false` when their rejection is informative.
 4. Load the matching phase skill:
@@ -24,10 +24,10 @@ the host actually provides it.
    - ideation → `branchforge-ideation`
    - software → `branchforge-software`
    - hybrid → load only the relevant phase skills in sequence
-5. Spawn independent native subagents for admitted branches. Give each the branch ID, bounded contract, allowed tools, evidence requirements, and return schema.
+5. Spawn independent native subagents for admitted branches. Give each the run ID, branch ID, bounded contract, stage invariants, allowed tools, evidence requirements, and return schema.
 6. Persist each returned result with `branch_record_result`. If an explorer cannot produce a result, call `branch_fail` with the concrete reason. Record additional provenance using `claim_record`, `evidence_record`, `finding_record`, and `artifact_store`.
 7. Load `branchforge-evaluate`. Verify branches before judgment.
-8. Continue, branch deeper, or prune according to information gain and budget. Add descendants with `parent_id` and the next `round_number`.
+8. Continue, branch deeper, or prune according to information gain and budget. Add descendants with `parent_id` and the next `round_number`. `branch_add` rejects admissions beyond the run's `max_branches` per round or `max_rounds`; treat that as the stopping condition, not an error to route around.
 9. Resolve every admitted branch by recording a result, failure, or prune reason. Call `stage_commit` only for a verified winner.
 
 ## Invariants
