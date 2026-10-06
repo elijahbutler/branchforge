@@ -40,8 +40,8 @@ def _allowed_checks(project: Path) -> tuple[dict[str, dict[str, Any]], list[Path
     from a tool argument or the project's own state, so an agent cannot author
     or alter what gets executed. The file also lists the projects it applies
     to: `project` arrives as a tool argument, so it is trusted only when the
-    user's file names it. Returns the checks and the worktree roots the user
-    listed.
+    user's file names it. Returns the checks and the extra directories the
+    user allows them to run in.
     """
     location = os.environ.get(CHECKS_FILE_FLAG)
     if not location:
@@ -57,14 +57,14 @@ def _allowed_checks(project: Path) -> tuple[dict[str, dict[str, Any]], list[Path
         raise ValueError(f"Cannot read the checks file {path}: {exc}") from exc
     checks = data.get("checks") if isinstance(data, dict) else None
     listed = data.get("projects") if isinstance(data, dict) else None
-    roots = data.get("worktree_roots", []) if isinstance(data, dict) else None
+    roots = data.get("workdir_roots", []) if isinstance(data, dict) else None
     if not isinstance(checks, dict) or not all(
         isinstance(paths, list) and all(isinstance(item, str) for item in paths) for paths in (listed, roots)
     ):
         raise ValueError(
             'The checks file must look like {"projects": ["/absolute/project/path"], '
             '"checks": {"<name>": {"command": ["program", "arg"]}}}, '
-            'with an optional "worktree_roots" list of directories'
+            'with an optional "workdir_roots" list of directories'
         )
     projects = [Path(item).expanduser().resolve() for item in listed]
     if any(path.is_relative_to(root) for root in projects):
@@ -101,20 +101,6 @@ def _run_command(argv: list[str], directory: Path, timeout: float) -> tuple[int 
             process.kill()
         output, _ = process.communicate()
         return None, output, True
-
-
-def _git_worktrees(project: Path) -> set[Path]:
-    """The project's own worktrees, asked of the trusted project and never of a caller-named directory."""
-    result = subprocess.run(
-        ["git", "-C", str(project), "worktree", "list", "--porcelain"], capture_output=True, text=True,
-    )
-    if result.returncode != 0:
-        return set()
-    return {
-        Path(line.removeprefix("worktree ")).resolve()
-        for line in result.stdout.splitlines()
-        if line.startswith("worktree ")
-    }
 
 
 def _choice(value: str, allowed: list[str], name: str) -> str:
@@ -447,7 +433,7 @@ class BranchForgeTools:
         timeout_seconds: float = 600.0,
     ) -> dict[str, Any]:
         """Run a check the user allowed and the stage referenced, and record what it did. Exit code 0 passes."""
-        allowed, worktree_roots = _allowed_checks(self.cwd)
+        allowed, workdir_roots = _allowed_checks(self.cwd)
         if not 0 < timeout_seconds <= MAX_TIMEOUT_SECONDS:
             raise ValueError(f"timeout_seconds must be positive and at most {MAX_TIMEOUT_SECONDS}")
         with self._repository() as repository:
@@ -462,7 +448,7 @@ class BranchForgeTools:
             raise ValueError(f"Check {name!r} is no longer in the checks file, so it cannot run")
         # The command comes from the user's file at run time, never from stored state.
         argv: list[str] = allowed[name]["command"]
-        directory = self._check_directory(workdir, worktree_roots)
+        directory = self._check_directory(workdir, workdir_roots)
         try:
             # No database connection is held while the command runs.
             exit_code, output, timed_out = _run_command(argv, directory, timeout_seconds)
@@ -484,7 +470,7 @@ class BranchForgeTools:
             repository.render_branch(branch_id)
             return asdict(check)
 
-    def _check_directory(self, workdir: str | None, worktree_roots: list[Path]) -> Path:
+    def _check_directory(self, workdir: str | None, workdir_roots: list[Path]) -> Path:
         if not workdir:
             return self.cwd
         directory = (self.cwd / workdir).resolve()
@@ -492,17 +478,14 @@ class BranchForgeTools:
             raise ValueError(f"Not a directory: {directory}")
         if directory.is_relative_to(self.cwd):
             return directory
-        # Worktree registrations live in the repository, which an agent can write,
-        # so a worktree outside the project counts only under a root the user listed.
-        worktrees = [item for item in _git_worktrees(self.cwd) if directory.is_relative_to(item)]
-        if not worktrees:
-            raise ValueError("workdir must be inside the project or a git worktree of the project repository")
-        if not any(item.is_relative_to(root) for item in worktrees for root in worktree_roots):
-            raise ValueError(
-                f"{directory} is a git worktree of the project but is not under a worktree root the user "
-                'listed in the checks file ("worktree_roots"); run the check inside the project instead'
-            )
-        return directory
+        # Only the user's own list widens this. Anything the project can assert about
+        # itself, such as a git worktree registration, is writable by the agent.
+        if any(directory.is_relative_to(root) for root in workdir_roots):
+            return directory
+        raise ValueError(
+            f"{directory} is outside the project and not under a directory the user listed in the "
+            'checks file ("workdir_roots"); run the check inside the project instead'
+        )
 
     def claim_record(self, run_id: str, branch_id: str, statement: str, *, kind: str = "claim", status: str = "open") -> dict[str, Any]:
         claim = Claim(branch_id, statement, kind=kind, status=status)

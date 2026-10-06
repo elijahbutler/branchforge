@@ -32,10 +32,10 @@ class CheckRunCase(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    def allow(self, command, projects=None, worktree_roots=(), **extra):
+    def allow(self, command, projects=None, workdir_roots=(), **extra):
         self.checks_file.write_text(json.dumps({
             "projects": [str(self.root)] if projects is None else projects,
-            "worktree_roots": list(worktree_roots),
+            "workdir_roots": list(workdir_roots),
             "checks": {"isolation": {"command": command, **extra}},
         }))
 
@@ -187,40 +187,37 @@ class ExecutedCheckTests(CheckRunCase):
         self.stage()
         branch_id = self.explored()
         with tempfile.TemporaryDirectory() as outside:
-            with self.assertRaisesRegex(ValueError, "git worktree of the project"):
+            with self.assertRaisesRegex(ValueError, "the user listed"):
                 self.tools.check_run(self.run_id, branch_id, "isolation", workdir=outside)
 
-    def worktree(self, parent):
+    def test_directory_under_a_root_the_user_listed_is_accepted(self):
+        with tempfile.TemporaryDirectory() as parent:
+            workspace = Path(parent).resolve() / "candidate"
+            workspace.mkdir()
+            self.allow(PASSING, workdir_roots=[str(Path(parent).resolve())])
+            self.stage()
+            check = self.tools.check_run(self.run_id, self.explored(), "isolation", workdir=str(workspace))
+            self.assertTrue(check["passed"])
+            self.assertEqual(check["workdir"], str(workspace))
+
+    def test_registering_a_git_worktree_does_not_make_a_directory_allowed(self):
+        # Worktree registrations live in the repository, which the agent can write.
         git = ["git", "-c", "user.name=t", "-c", "user.email=t@example.com", "-C", str(self.root)]
         subprocess.run([*git, "init", "-q"], check=True)
         subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", "init"], check=True)
-        path = Path(parent).resolve() / "candidate"
-        subprocess.run([*git, "worktree", "add", "-q", str(path)], check=True, capture_output=True)
-        return path
-
-    def test_git_worktree_under_a_root_the_user_listed_is_accepted(self):
         with tempfile.TemporaryDirectory() as parent:
-            worktree = self.worktree(parent)
-            self.allow(PASSING, worktree_roots=[str(Path(parent).resolve())])
+            worktree = Path(parent).resolve() / "candidate"
+            subprocess.run([*git, "worktree", "add", "-q", str(worktree)], check=True, capture_output=True)
             self.stage()
-            check = self.tools.check_run(self.run_id, self.explored(), "isolation", workdir=str(worktree))
-            self.assertTrue(check["passed"])
-            self.assertEqual(check["workdir"], str(worktree))
-
-    def test_git_worktree_outside_the_listed_roots_is_refused(self):
-        # Worktree registrations live in the repository, which the agent can write.
-        with tempfile.TemporaryDirectory() as parent:
-            worktree = self.worktree(parent)
-            self.stage()
-            with self.assertRaisesRegex(ValueError, "worktree root"):
+            with self.assertRaisesRegex(ValueError, "the user listed"):
                 self.tools.check_run(self.run_id, self.explored(), "isolation", workdir=str(worktree))
 
-    def test_directory_under_a_listed_root_that_is_not_a_worktree_is_refused(self):
-        with tempfile.TemporaryDirectory() as parent:
-            self.allow(PASSING, worktree_roots=[str(Path(parent).resolve())])
+    def test_symlink_inside_the_project_cannot_point_a_check_elsewhere(self):
+        with tempfile.TemporaryDirectory() as outside:
+            (self.root / "link").symlink_to(outside)
             self.stage()
-            with self.assertRaisesRegex(ValueError, "git worktree of the project"):
-                self.tools.check_run(self.run_id, self.explored(), "isolation", workdir=parent)
+            with self.assertRaisesRegex(ValueError, "the user listed"):
+                self.tools.check_run(self.run_id, self.explored(), "isolation", workdir="link")
 
     def test_declared_check_must_name_a_stage_invariant(self):
         with self.assertRaisesRegex(ValueError, "Tenant isolation"):

@@ -124,8 +124,9 @@ Artifacts are stored by SHA-256 under `.branchforge/objects`. Dossiers are rende
 
 - Check execution is off by default. Without it the host runs the command and reports the outcome through `check_record`, so a check is only as honest as the agent recording it.
 - `check_run` runs the command with the server's own permissions and environment, not in a sandbox. An allowed command such as a test runner executes code from the branch's directory, which the agent wrote. Allow only commands you would let the agent run anyway.
-- The agent chooses the directory a check runs in, within the project and worktrees under the roots the user listed. A check can therefore pass against a directory that does not hold the branch's work. Each executed check records its directory, and the dossier prints it, so a reviewer can tell.
+- The agent chooses the directory a check runs in, within the project and the directories the user listed. A check can therefore pass against a directory that does not hold the branch's work. Each executed check records its directory, and the dossier prints it, so a reviewer can tell.
 - The check's output is stored as an artifact in the project. A command that prints secrets from the environment leaves them there.
+- The state database and dossiers live in the project, where the agent can write. An agent that edits `.branchforge/state.db` directly can forge any record, including an executed check. The rules stop an agent's mistakes and shortcuts through the tools. They do not stop an agent that sets out to falsify the record.
 - An agent with unrestricted shell access could edit the checks file itself. The file's protection is the host's permission prompt for writes outside the project.
 - The headless kernel cannot execute anything, so its stages are always `judged`.
 - The event log is an audit trail. State is not rebuilt from it.

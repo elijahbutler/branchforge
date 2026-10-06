@@ -199,7 +199,7 @@ Never broaden the user's permissions through branching."""
         run_id: RunId,
         branch_id: BranchId,
         name: Annotated[str, Field(description="Name of a check the stage referenced in stage_create.")],
-        workdir: Annotated[str | None, Field(description="Directory holding this branch's work: a path inside cwd, or a git worktree of the project under a root the user allowed. Defaults to cwd.")] = None,
+        workdir: Annotated[str | None, Field(description="Directory holding this branch's work: a path inside cwd, or under a directory the user listed in their checks file. Defaults to cwd.")] = None,
         timeout_seconds: Annotated[float, Field(description="Seconds before the command is killed and recorded as failed. At most 3600.")] = 600.0,
         cwd: Cwd = None,
     ) -> dict[str, Any]:
