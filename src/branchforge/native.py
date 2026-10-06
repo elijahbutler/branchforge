@@ -5,7 +5,8 @@ import os
 import shlex
 import signal
 import subprocess
-import threading
+import tempfile
+import time
 from contextlib import contextmanager
 from dataclasses import asdict
 from pathlib import Path
@@ -32,6 +33,7 @@ CHECKS_FILE_FLAG = "BRANCHFORGE_CHECKS_FILE"
 LOG_TAIL = 600
 MAX_TIMEOUT_SECONDS = 3600
 MAX_LOG_BYTES = 1024 * 1024
+MAX_OUTPUT_BYTES = 64 * 1024 * 1024
 
 
 def _allowed_checks(project: Path) -> tuple[dict[str, dict[str, Any]], list[Path]]:
@@ -85,38 +87,47 @@ def _allowed_checks(project: Path) -> tuple[dict[str, dict[str, Any]], list[Path
     return allowed, [Path(item).expanduser().resolve() for item in roots]
 
 
-def _run_command(argv: list[str], directory: Path, timeout: float) -> tuple[int | None, bytes, bool]:
-    """Run an allowed check without a shell. Returns exit code, the tail of its output, and whether it timed out."""
-    process = subprocess.Popen(
-        argv, cwd=directory, stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, start_new_session=True,
-    )
-    assert process.stdout is not None
-    stream = process.stdout
-    tail = bytearray()
-
-    def drain() -> None:
-        # Keep only the tail as it arrives, so a noisy check cannot exhaust memory.
-        for chunk in iter(lambda: stream.read(65536), b""):
-            tail.extend(chunk)
-            del tail[:-MAX_LOG_BYTES]
-
-    reader = threading.Thread(target=drain, daemon=True)
-    reader.start()
-    timed_out = False
+def _kill_group(process: subprocess.Popen[bytes]) -> None:
+    """Kill the check's whole process group, including children a finished check left behind."""
     try:
-        process.wait(timeout=timeout)
-    except subprocess.TimeoutExpired:
-        timed_out = True
-        # Kill the whole process group so a test runner's children do not outlive it.
         if hasattr(os, "killpg"):
             os.killpg(process.pid, signal.SIGKILL)
-        else:
+        elif process.poll() is None:
             process.kill()
+    except (ProcessLookupError, PermissionError):
+        pass  # The group is already gone.
+
+
+def _run_command(argv: list[str], directory: Path, timeout: float) -> tuple[int | None, bytes, str | None]:
+    """Run an allowed check without a shell.
+
+    Returns the exit code, the tail of the output, and why the check was
+    stopped early, if it was. Output goes to an unnamed temporary file, so it
+    costs no memory and leaves no reader waiting on a child that keeps the
+    stream open.
+    """
+    with tempfile.TemporaryFile() as log:
+        process = subprocess.Popen(
+            argv, cwd=directory, stdin=subprocess.DEVNULL,
+            stdout=log, stderr=subprocess.STDOUT, start_new_session=True,
+        )
+        deadline = time.monotonic() + timeout
+        stopped: str | None = None
+        while stopped is None:
+            try:
+                process.wait(timeout=0.05)
+                break
+            except subprocess.TimeoutExpired:
+                if time.monotonic() >= deadline:
+                    stopped = f"timed out after {timeout:g}s"
+                elif os.fstat(log.fileno()).st_size > MAX_OUTPUT_BYTES:
+                    stopped = f"exceeded the {MAX_OUTPUT_BYTES // (1024 * 1024)} MB output limit"
+        _kill_group(process)
         process.wait()
-    # A surviving grandchild can hold the pipe open; do not wait on it forever.
-    reader.join(timeout=5)
-    return (None if timed_out else process.returncode), bytes(tail), timed_out
+        size = os.fstat(log.fileno()).st_size
+        log.seek(max(0, size - MAX_LOG_BYTES))
+        output = log.read(MAX_LOG_BYTES)
+    return (None if stopped else process.returncode), output, stopped
 
 
 def _choice(value: str, allowed: list[str], name: str) -> str:
@@ -467,7 +478,7 @@ class BranchForgeTools:
         directory = self._check_directory(workdir, workdir_roots)
         try:
             # No database connection is held while the command runs.
-            exit_code, output, timed_out = _run_command(argv, directory, timeout_seconds)
+            exit_code, output, stopped = _run_command(argv, directory, timeout_seconds)
         except OSError as exc:
             raise ValueError(f"Cannot start check {name!r}: {exc}") from exc
         tail = output.decode(errors="replace")[-LOG_TAIL:].strip()
@@ -475,10 +486,10 @@ class BranchForgeTools:
             with repository.store.atomic():
                 artifact = repository.store_artifact(run_id, branch_id, output, role="check-log", media_type="text/plain")
                 check = Check(
-                    branch_id, name, exit_code == 0 and not timed_out, kind=allowed[name]["kind"],
+                    branch_id, name, exit_code == 0 and stopped is None, kind=allowed[name]["kind"],
                     invariant=declared[name].get("invariant"), command=shlex.join(argv), exit_code=exit_code,
                     artifact_id=artifact.id, executed=True, workdir=str(directory),
-                    details=f"timed out after {timeout_seconds:g}s\n{tail}".strip() if timed_out else tail,
+                    details=f"{stopped}\n{tail}".strip() if stopped else tail,
                 )
                 repository.record_check(run_id, check)
             repository.render_branch(branch_id)

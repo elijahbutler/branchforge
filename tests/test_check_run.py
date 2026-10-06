@@ -170,15 +170,52 @@ class ExecutedCheckTests(CheckRunCase):
         self.assertFalse(check["passed"])
         self.assertIn("timed out", check["details"])
 
-    def test_output_is_bounded_while_it_is_read(self):
+    def test_only_the_tail_of_the_output_is_kept(self):
         from branchforge import native
 
         noisy = [sys.executable, "-c", "import sys; sys.stdout.write('x' * 500000); print('END')"]
         with mock.patch.object(native, "MAX_LOG_BYTES", 1000):
-            exit_code, output, timed_out = native._run_command(noisy, self.root, 30)
-        self.assertEqual((exit_code, timed_out), (0, False))
+            exit_code, output, stopped = native._run_command(noisy, self.root, 30)
+        self.assertEqual((exit_code, stopped), (0, None))
         self.assertLessEqual(len(output), 1000)
         self.assertTrue(output.rstrip().endswith(b"END"))
+
+    def test_check_that_floods_its_output_is_stopped(self):
+        from branchforge import native
+
+        flood = [sys.executable, "-c", "import sys\nwhile True: sys.stdout.write('x' * 65536)"]
+        with mock.patch.object(native, "MAX_OUTPUT_BYTES", 200_000):
+            exit_code, _, stopped = native._run_command(flood, self.root, 30)
+        self.assertIsNone(exit_code)
+        self.assertIn("output limit", stopped)
+
+    def test_child_left_running_by_a_finished_check_is_killed(self):
+        import threading
+        import time
+
+        from branchforge import native
+
+        # The parent exits at once; its child keeps the output open and would run for a minute.
+        spawn = (
+            "import subprocess, sys; "
+            "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)']); "
+            "print(child.pid)"
+        )
+        threads = threading.active_count()
+        started = time.monotonic()
+        exit_code, output, stopped = native._run_command([sys.executable, "-c", spawn], self.root, 30)
+        self.assertEqual((exit_code, stopped), (0, None))
+        self.assertLess(time.monotonic() - started, 10)
+        self.assertEqual(threading.active_count(), threads)
+        child = int(output.split()[0])
+        for _ in range(100):
+            try:
+                os.kill(child, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.05)
+        else:
+            self.fail("the check's child process is still running")
 
     def test_timeout_has_an_upper_bound(self):
         self.stage()
