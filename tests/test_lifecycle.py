@@ -76,6 +76,23 @@ class RunFinalityTests(LifecycleCase):
             repository.record_verification(run_id, late, [])
         self.assertTrue(repository.get_branch(winner)["verified"])
 
+    def test_artifact_is_not_added_to_a_run_that_finished_during_the_copy(self):
+        run_id = self.run_with_stage()
+        branch_id = self.explored(run_id)
+        store = EventStore(self.root / ".branchforge" / "state.db")
+        self.addCleanup(store.close)
+        repository = BranchRepository(store, self.root / ".branchforge")
+        copy = repository.artifacts.store_bytes
+
+        def finish_while_copying(content):
+            repository.finish_run(run_id, error="Stopped by another request")
+            return copy(content)
+
+        with mock.patch.object(repository.artifacts, "store_bytes", side_effect=finish_while_copying):
+            with self.assertRaisesRegex(ValueError, "is failed"):
+                repository.store_artifact(run_id, branch_id, b"log")
+        self.assertEqual(repository.records("artifacts", branch_id), [])
+
     def test_failed_run_closes_open_branches_with_the_reason(self):
         run_id = self.run_with_stage()
         waiting = self.tools.branch_add(run_id, "stage", "Waiting", "Claim", "Difference")
@@ -200,6 +217,16 @@ class ObservedEvidenceTests(LifecycleCase):
         self.assertRegex(actions, r"check_record[^.]*Idempotent writes")
         self.assertNotRegex(actions, r"check_record[^.]*Tenant isolation")
         self.assertIn(branch_id, actions)
+
+    def test_run_status_asks_for_a_check_before_verification_when_none_passed(self):
+        run_id = self.run_with_stage(mode="software")
+        branch_id = self.explored(run_id)
+        actions = " ".join(self.tools.run_status(run_id)["next_actions"])
+        self.assertIn("check_record", actions)
+        self.assertNotIn(f"Verify or prune explored branch {branch_id}", actions)
+        self.tools.check_record(run_id, branch_id, "pytest", True)
+        actions = " ".join(self.tools.run_status(run_id)["next_actions"])
+        self.assertIn(f"Verify or prune explored branch {branch_id}", actions)
 
     def test_run_status_names_the_checks_still_missing(self):
         run_id = self.run_with_stage(mode="software", invariants=["Tenant isolation"])

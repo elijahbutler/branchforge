@@ -482,6 +482,13 @@ class BranchRepository:
                                 f"Record a check_record result for each unchecked invariant of branch "
                                 f"{branch['branch_id']}: {', '.join(reportable)}."
                             )
+                    elif stage["evidence_policy"] == "observed" and not any(
+                        check["passed"] for check in self.checks(branch["branch_id"])
+                    ):
+                        next_actions.append(
+                            f"Record at least one passing check for branch {branch['branch_id']} with "
+                            "check_record or check_run before verifying it."
+                        )
                     else:
                         next_actions.append(f"Verify or prune explored branch {branch['branch_id']}.")
                 if verified and not unfinished:
@@ -749,6 +756,8 @@ class BranchRepository:
             size=size, role=role, object_path=str(destination), source_uri=source_uri,
         )
         with self.store.atomic():
+            # The copy above can be slow; the run may have finished meanwhile.
+            self._running_run(run_id)
             self._write(
                 """INSERT INTO artifacts(artifact_id, run_id, branch_id, sha256, media_type,
                    size, role, object_path, source_uri, metadata, created_at)
