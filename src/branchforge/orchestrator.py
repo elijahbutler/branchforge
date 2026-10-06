@@ -49,8 +49,12 @@ class BranchForge:
             self.repository.render_run(run_id)
             return outcomes
         except Exception as exc:
-            self.repository.finish_run(run_id, error=str(exc) or type(exc).__name__)
-            self.repository.render_run(run_id)
+            # A failure after completion, such as a full disk while rendering, leaves
+            # the run completed; only a run still open is marked failed.
+            run = self.repository.get_run(run_id)
+            if run is not None and run["status"] == "running":
+                self.repository.finish_run(run_id, error=str(exc) or type(exc).__name__)
+                self.repository.render_run(run_id)
             raise
 
     async def _run_stage(self, run_id: str, goal: str, stage: StageSpec, context: str) -> StageOutcome:

@@ -5,6 +5,7 @@ import os
 import shlex
 import signal
 import subprocess
+import threading
 from contextlib import contextmanager
 from dataclasses import asdict
 from pathlib import Path
@@ -85,22 +86,37 @@ def _allowed_checks(project: Path) -> tuple[dict[str, dict[str, Any]], list[Path
 
 
 def _run_command(argv: list[str], directory: Path, timeout: float) -> tuple[int | None, bytes, bool]:
-    """Run an allowed check without a shell. Returns exit code, combined output, and whether it timed out."""
+    """Run an allowed check without a shell. Returns exit code, the tail of its output, and whether it timed out."""
     process = subprocess.Popen(
         argv, cwd=directory, stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, start_new_session=True,
     )
+    assert process.stdout is not None
+    stream = process.stdout
+    tail = bytearray()
+
+    def drain() -> None:
+        # Keep only the tail as it arrives, so a noisy check cannot exhaust memory.
+        for chunk in iter(lambda: stream.read(65536), b""):
+            tail.extend(chunk)
+            del tail[:-MAX_LOG_BYTES]
+
+    reader = threading.Thread(target=drain, daemon=True)
+    reader.start()
+    timed_out = False
     try:
-        output, _ = process.communicate(timeout=timeout)
-        return process.returncode, output, False
+        process.wait(timeout=timeout)
     except subprocess.TimeoutExpired:
+        timed_out = True
         # Kill the whole process group so a test runner's children do not outlive it.
         if hasattr(os, "killpg"):
             os.killpg(process.pid, signal.SIGKILL)
         else:
             process.kill()
-        output, _ = process.communicate()
-        return None, output, True
+        process.wait()
+    # A surviving grandchild can hold the pipe open; do not wait on it forever.
+    reader.join(timeout=5)
+    return (None if timed_out else process.returncode), bytes(tail), timed_out
 
 
 def _choice(value: str, allowed: list[str], name: str) -> str:
@@ -457,9 +473,7 @@ class BranchForgeTools:
         tail = output.decode(errors="replace")[-LOG_TAIL:].strip()
         with self._repository() as repository:
             with repository.store.atomic():
-                artifact = repository.store_artifact(
-                    run_id, branch_id, output[-MAX_LOG_BYTES:], role="check-log", media_type="text/plain",
-                )
+                artifact = repository.store_artifact(run_id, branch_id, output, role="check-log", media_type="text/plain")
                 check = Check(
                     branch_id, name, exit_code == 0 and not timed_out, kind=allowed[name]["kind"],
                     invariant=declared[name].get("invariant"), command=shlex.join(argv), exit_code=exit_code,

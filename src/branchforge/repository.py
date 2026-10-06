@@ -466,10 +466,22 @@ class BranchRepository:
                             "fix it and record a passing check, or prune it."
                         )
                     elif missing and stage["evidence_policy"] == "observed":
-                        next_actions.append(
-                            f"Record a check_record result for each unchecked invariant of branch "
-                            f"{branch['branch_id']}: {', '.join(missing)}."
-                        )
+                        # An invariant with a declared check accepts only an executed result.
+                        declared = {
+                            item["invariant"]: item["name"] for item in stage["checks"] if item.get("invariant")
+                        }
+                        runnable = [declared[item] for item in missing if item in declared]
+                        reportable = [item for item in missing if item not in declared]
+                        if runnable:
+                            next_actions.append(
+                                f"Run check_run for branch {branch['branch_id']} with each of these checks: "
+                                f"{', '.join(runnable)}."
+                            )
+                        if reportable:
+                            next_actions.append(
+                                f"Record a check_record result for each unchecked invariant of branch "
+                                f"{branch['branch_id']}: {', '.join(reportable)}."
+                            )
                     else:
                         next_actions.append(f"Verify or prune explored branch {branch['branch_id']}.")
                 if verified and not unfinished:
@@ -618,6 +630,7 @@ class BranchRepository:
 
     def record_verification(self, run_id: str, result: BranchResult, notes: list[str]) -> None:
         with self.store.atomic():
+            self._running_run(run_id)
             branch = self._branch(run_id, result.hypothesis.id)
             self._write_verification(run_id, branch, result.scores, result.verified, notes)
 

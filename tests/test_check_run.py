@@ -170,6 +170,16 @@ class ExecutedCheckTests(CheckRunCase):
         self.assertFalse(check["passed"])
         self.assertIn("timed out", check["details"])
 
+    def test_output_is_bounded_while_it_is_read(self):
+        from branchforge import native
+
+        noisy = [sys.executable, "-c", "import sys; sys.stdout.write('x' * 500000); print('END')"]
+        with mock.patch.object(native, "MAX_LOG_BYTES", 1000):
+            exit_code, output, timed_out = native._run_command(noisy, self.root, 30)
+        self.assertEqual((exit_code, timed_out), (0, False))
+        self.assertLessEqual(len(output), 1000)
+        self.assertTrue(output.rstrip().endswith(b"END"))
+
     def test_timeout_has_an_upper_bound(self):
         self.stage()
         with self.assertRaisesRegex(ValueError, "at most 3600"):

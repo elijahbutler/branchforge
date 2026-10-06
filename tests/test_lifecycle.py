@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from branchforge.models import RunConfig, StageSpec
+from branchforge.models import BranchResult, Hypothesis, RunConfig, StageSpec
 from branchforge.native import BranchForgeTools
 from branchforge.orchestrator import BranchForge
 from branchforge.providers import MockProvider
@@ -62,6 +62,19 @@ class RunFinalityTests(LifecycleCase):
         with self.assertRaisesRegex(ValueError, "is completed"):
             self.tools.run_finish(run_id, error="Changed my mind")
         self.assertEqual(self.tools.run_view(run_id)["run"]["status"], "completed")
+
+    def test_completed_run_rejects_a_late_verification_write(self):
+        run_id = self.run_with_stage()
+        winner = self.verified(run_id)
+        self.tools.stage_commit(run_id, "stage", winner, "Best evidence", 0.8)
+        self.tools.run_finish(run_id)
+        store = EventStore(self.root / ".branchforge" / "state.db")
+        self.addCleanup(store.close)
+        repository = BranchRepository(store, self.root / ".branchforge")
+        late = BranchResult(Hypothesis("t", "c", "d", [], [], 0.5, id=winner), "p", [], [], 0.5, scores={"correctness": 0.0})
+        with self.assertRaisesRegex(ValueError, "is completed"):
+            repository.record_verification(run_id, late, [])
+        self.assertTrue(repository.get_branch(winner)["verified"])
 
     def test_failed_run_closes_open_branches_with_the_reason(self):
         run_id = self.run_with_stage()
@@ -165,6 +178,28 @@ class ObservedEvidenceTests(LifecycleCase):
         branch_id = self.explored(run_id)
         with self.assertRaisesRegex(ValueError, "Tenant isolation"):
             self.tools.check_record(run_id, branch_id, "test", True, invariant="Tenant isolaton")
+
+    def test_run_status_points_to_check_run_for_an_invariant_with_a_declared_check(self):
+        with tempfile.TemporaryDirectory() as config:
+            checks_file = Path(config) / "checks.json"
+            checks_file.write_text(json.dumps({
+                "projects": [str(self.root.resolve())],
+                "checks": {"isolation": {"command": [sys.executable, "-c", "pass"]}},
+            }))
+            with mock.patch.dict(os.environ, {"BRANCHFORGE_CHECKS_FILE": str(checks_file)}):
+                run_id = self.tools.run_create("Goal")["run_id"]
+                self.tools.stage_create(
+                    run_id, "stage", "Objective", mode="software",
+                    invariants=["Tenant isolation", "Idempotent writes"],
+                    checks=[{"name": "isolation", "invariant": "Tenant isolation"}],
+                )
+        branch_id = self.explored(run_id)
+        actions = " ".join(self.tools.run_status(run_id)["next_actions"])
+        self.assertIn("check_run", actions)
+        self.assertIn("isolation", actions)
+        self.assertRegex(actions, r"check_record[^.]*Idempotent writes")
+        self.assertNotRegex(actions, r"check_record[^.]*Tenant isolation")
+        self.assertIn(branch_id, actions)
 
     def test_run_status_names_the_checks_still_missing(self):
         run_id = self.run_with_stage(mode="software", invariants=["Tenant isolation"])
@@ -309,6 +344,28 @@ class OrchestratorTests(unittest.TestCase):
             self.assertEqual(forge.repository.get_run(run_id)["status"], "completed")
             tweak = [item for item in forge.repository.branches(run_id) if item["title"] == "Tweak"]
             self.assertEqual([item["status"] for item in tweak], ["pruned"])
+
+
+    def test_error_after_completion_is_reported_as_itself(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = EventStore(Path(directory) / "events.db")
+            self.addCleanup(store.close)
+            forge = BranchForge(MockProvider(), store, RunConfig(max_rounds=1))
+            real_render = forge.repository.render_run
+            calls = {"finished": False}
+
+            def render(run_id):
+                # Fail only the render that follows a completed run.
+                if forge.repository.get_run(run_id)["status"] == "completed" and not calls["finished"]:
+                    calls["finished"] = True
+                    raise OSError("No space left on device")
+                return real_render(run_id)
+
+            with mock.patch.object(forge.repository, "render_run", side_effect=render):
+                with self.assertRaisesRegex(OSError, "No space left"):
+                    asyncio.run(forge.run("Goal", [StageSpec("stage", "Objective")]))
+            run_id = store.run_ids()[0]
+            self.assertEqual(forge.repository.get_run(run_id)["status"], "completed")
 
 
 class CliTests(unittest.TestCase):
