@@ -49,6 +49,11 @@ class NativeToolsTests(unittest.TestCase):
                     risks=["Scale remains untested"],
                     confidence=0.75,
                 )
+                for invariant in ("At-least-once delivery", "Tenant isolation"):
+                    tools.check_record(
+                        run_id, branch["branch_id"], f"{invariant} test", True,
+                        invariant=invariant, command="pytest", exit_code=0,
+                    )
                 tools.branch_verify(
                     run_id,
                     branch["branch_id"],
@@ -163,7 +168,7 @@ class NativeToolsTests(unittest.TestCase):
 
         server = build_server()
         names = {tool.name for tool in server._tool_manager.list_tools()}
-        self.assertEqual(len(names), 20)
+        self.assertEqual(len(names), 21)
         self.assertIn("run_status", names)
         self.assertIn("branch_fail", names)
         prompts = {prompt.name for prompt in server._prompt_manager.list_prompts()}

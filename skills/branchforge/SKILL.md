@@ -33,8 +33,8 @@ If the host cannot activate a sibling phase skill, continue directly instead of 
 1. Call `stage_create`.
 2. Form two to four materially distinct, falsifiable candidates and persist each with `branch_add`.
 3. Explore admitted branches independently with native subagents when available.
-4. Record results, claims, evidence, findings, and explicitly authorized artifacts. Call `branch_fail` for an explorer that cannot return a result.
-5. Verify every viable result with `branch_verify`; prune rejected candidates with a reason.
+4. Record results, claims, evidence, findings, and explicitly authorized artifacts. Record every test, benchmark, or inspection outcome with `check_record`, tied to the stage invariant it decides. Call `branch_fail` for an explorer that cannot return a result.
+5. Verify every viable result with `branch_verify`; prune rejected candidates with a reason. A failed invariant check blocks verification.
 6. Resolve every admitted branch, then call `stage_commit` for one verified winner.
 7. Repeat for the next bounded stage. Call `run_finish` only after all stages commit.
 

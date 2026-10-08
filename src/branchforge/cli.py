@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import sys
 from dataclasses import asdict
 from pathlib import Path
 
@@ -16,7 +17,7 @@ from .store import EventStore
 
 def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(prog="branchforge", description="Adaptive multi-agent branch search")
-    root.add_argument("--db", default="branchforge.db", help="SQLite event store")
+    root.add_argument("--db", help="SQLite state file (default: .branchforge/state.db, shared with the MCP server)")
     root.add_argument("--workspace", help="Dossiers and content-addressed artifact directory")
     commands = root.add_subparsers(dest="command", required=True)
     run = commands.add_parser("run", help="Run a staged search")
@@ -30,6 +31,7 @@ def parser() -> argparse.ArgumentParser:
     run.add_argument("--rounds", type=int, default=1)
     run.add_argument("--mode", choices=[mode.value for mode in BranchMode], default=BranchMode.HYBRID.value)
     run.add_argument("--stage-mode", action="append", choices=[mode.value for mode in BranchMode], default=[], help="Mode for each --stage; repeat in stage order")
+    run.add_argument("--evidence-policy", choices=["observed", "judged"], help="Default: observed for software stages, judged otherwise. The headless kernel cannot record checks, so software stages need judged")
     inspect = commands.add_parser("inspect", help="Print a run's event history")
     inspect.add_argument("run_id", nargs="?")
     status = commands.add_parser("status", help="Summarize run progress, blockers, and next actions")
@@ -45,14 +47,43 @@ def parser() -> argparse.ArgumentParser:
     return root
 
 
+NO_RUNS = {
+    "run": None,
+    "stages": [],
+    "blockers": ["No BranchForge runs found."],
+    "next_actions": ["Create a run with branchforge run or run_create."],
+    "finishable": False,
+}
+
+
+def locate_state(args: argparse.Namespace) -> tuple[Path, Path | None]:
+    """Pick the database and workspace, defaulting to the files the MCP server uses."""
+    workspace = Path(args.workspace) if args.workspace else None
+    if args.db:
+        return Path(args.db), workspace
+    state = Path(".branchforge") / "state.db"
+    legacy = Path("branchforge.db")
+    if legacy.exists() and not state.exists():
+        return legacy, workspace
+    return state, workspace or state.parent
+
+
 async def execute(args: argparse.Namespace) -> int:
     if args.command == "doctor":
         result = run_doctor(args.host)
         print(json.dumps(result, indent=2))
         return 0 if result["ok"] else 1
 
-    store = EventStore(args.db)
-    repository = BranchRepository(store, args.workspace)
+    database, workspace = locate_state(args)
+    if args.command != "run" and not database.exists():
+        # Inspection never creates state.
+        if args.command == "runs":
+            return 0
+        print(json.dumps(NO_RUNS, indent=2) if args.command == "status" else "No runs found.")
+        return 1
+    database.parent.mkdir(parents=True, exist_ok=True)
+    store = EventStore(database)
+    repository = BranchRepository(store, workspace)
     try:
         if args.command == "runs":
             print("\n".join(store.run_ids()))
@@ -65,18 +96,11 @@ async def execute(args: argparse.Namespace) -> int:
             print(json.dumps(store.events(run_id), indent=2))
             return 0
         if args.command == "status":
-            tools_repository = BranchRepository(store, args.workspace)
             run_id = args.run_id or next(iter(store.run_ids()), None)
             if not run_id:
-                print(json.dumps({
-                    "run": None,
-                    "stages": [],
-                    "blockers": ["No BranchForge runs found."],
-                    "next_actions": ["Create a run with branchforge run or run_create."],
-                    "finishable": False,
-                }, indent=2))
+                print(json.dumps(NO_RUNS, indent=2))
                 return 1
-            print(json.dumps(tools_repository.run_status(run_id), indent=2))
+            print(json.dumps(repository.run_status(run_id), indent=2))
             return 0
         if args.command in {"tree", "dossier"}:
             run_id = args.run_id or next(iter(store.run_ids()), None)
@@ -98,7 +122,10 @@ async def execute(args: argparse.Namespace) -> int:
         if not stage_modes:
             stage_modes = [args.mode] * len(stage_names)
         stages = [
-            StageSpec(f"stage-{index}", objective, mode=BranchMode(stage_modes[index - 1]))
+            StageSpec(
+                f"stage-{index}", objective, mode=BranchMode(stage_modes[index - 1]),
+                evidence_policy=args.evidence_policy,
+            )
             for index, objective in enumerate(stage_names, 1)
         ]
         outcomes = await BranchForge(provider, store, config, judge_provider=judge, repository=repository).run(args.goal, stages)
@@ -115,7 +142,14 @@ def main() -> None:
 
         run()
         return
-    raise SystemExit(asyncio.run(execute(args)))
+    try:
+        raise SystemExit(asyncio.run(execute(args)))
+    except ValueError as exc:
+        print(f"branchforge: error: {exc}", file=sys.stderr)
+        raise SystemExit(2) from exc
+    except RuntimeError as exc:
+        print(f"branchforge: run failed: {exc}", file=sys.stderr)
+        raise SystemExit(1) from exc
 
 
 if __name__ == "__main__":

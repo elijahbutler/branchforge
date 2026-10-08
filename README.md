@@ -24,8 +24,9 @@ Single-path agent reasoning can anchor too early, inherit bad assumptions, and f
 2. Add two to four materially different hypotheses.
 3. Explore branches independently.
 4. Record claims, evidence, findings, risks, and artifacts.
-5. Verify candidates and commit one stage winner.
-6. Render durable dossiers under `.branchforge/runs/<run_id>/`.
+5. Record each test, benchmark, or inspection result as a check. A branch with a failed invariant check cannot be verified.
+6. Verify candidates and commit one stage winner.
+7. Render durable dossiers under `.branchforge/runs/<run_id>/`.
 
 ## Quick Start
 
@@ -67,7 +68,7 @@ branchforge tree
 branchforge dossier
 ```
 
-`doctor` runs non-mutating install diagnostics. `status` reports blockers and next actions for a run. `tree` and `dossier` inspect durable output.
+`doctor` runs non-mutating install diagnostics. `status` reports blockers and next actions for a run. `tree` and `dossier` inspect durable output. All three read `.branchforge/state.db`, so they also show runs made through the MCP server.
 
 ## Repository Layout
 
