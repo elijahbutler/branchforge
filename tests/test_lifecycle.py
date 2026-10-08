@@ -93,6 +93,28 @@ class RunFinalityTests(LifecycleCase):
                 repository.store_artifact(run_id, branch_id, b"log")
         self.assertEqual(repository.records("artifacts", branch_id), [])
 
+    def repository(self):
+        store = EventStore(self.root / ".branchforge" / "state.db")
+        self.addCleanup(store.close)
+        return BranchRepository(store, self.root / ".branchforge")
+
+    def late_result(self, branch_id):
+        return BranchResult(Hypothesis("t", "c", "d", [], [], 0.5, id=branch_id), "Rewritten", [], [], 0.1)
+
+    def test_committed_result_cannot_be_rewritten_while_the_run_is_open(self):
+        run_id = self.run_with_stage()
+        winner = self.verified(run_id)
+        self.tools.stage_commit(run_id, "stage", winner, "Best evidence", 0.8)
+        self.tools.stage_create(run_id, "next", "Objective")
+        repository = self.repository()
+        with self.assertRaisesRegex(ValueError, "committed"):
+            repository.record_result(run_id, self.late_result(winner))
+        with self.assertRaisesRegex(ValueError, "committed"):
+            repository.record_verification(run_id, self.late_result(winner), [])
+        branch = repository.get_branch(winner)
+        self.assertEqual(branch["proposal"], "Proposal")
+        self.assertTrue(branch["verified"])
+
     def test_failed_run_closes_open_branches_with_the_reason(self):
         run_id = self.run_with_stage()
         waiting = self.tools.branch_add(run_id, "stage", "Waiting", "Claim", "Difference")

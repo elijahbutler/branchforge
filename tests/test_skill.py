@@ -95,6 +95,14 @@ class SkillPackageTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertEqual((foreign / "SKILL.md").read_text(), "someone else's skill")
 
+    def test_evaluate_skill_reads_full_candidates_not_summaries(self):
+        skill = (ROOT / "skills" / "branchforge-evaluate" / "SKILL.md").read_text()
+        self.assertIn("`branch_view`", skill)
+
+    def test_agent_installer_finds_claude_desktop_before_its_first_launch(self):
+        installer = (ROOT / "scripts" / "install-agent.sh").read_text()
+        self.assertIn("/Applications/Claude.app", installer)
+
     def test_desktop_installer_preserves_existing_configuration(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

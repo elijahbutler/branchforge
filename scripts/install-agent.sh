@@ -75,7 +75,9 @@ if [[ "$platform" != "codex" ]]; then
   else
     echo "Skipped Claude Code: claude is not on PATH"
   fi
-  if [[ "$(uname -s)" == "Darwin" && -d "$HOME/Library/Application Support/Claude" ]]; then
+  # The config directory appears on first launch, so also look for the app itself.
+  if [[ "$(uname -s)" == "Darwin" ]] && [[ -d "$HOME/Library/Application Support/Claude" \
+      || -d "/Applications/Claude.app" || -d "$HOME/Applications/Claude.app" ]]; then
     targets+=(claude_desktop)
   else
     echo "Skipped Claude Desktop: no macOS installation found"

@@ -563,6 +563,8 @@ class BranchRepository:
         with self.store.atomic():
             self._running_run(run_id)
             branch = self._branch(run_id, result.hypothesis.id)
+            if branch["status"] != BranchStatus.RUNNING.value:
+                raise ValueError(f"Branch is {branch['status']}; a result is recorded only while the branch is running")
             self._write(
                 """UPDATE branches SET proposal = ?, risks = ?, confidence = ?, scores = ?,
                    verified = ?, updated_at = ? WHERE branch_id = ?""",
@@ -607,6 +609,8 @@ class BranchRepository:
         with self.store.atomic():
             self._running_run(run_id)
             branch = self._branch(run_id, result.hypothesis.id)
+            if branch["status"] != BranchStatus.EXPLORED.value:
+                raise ValueError(f"Branch is {branch['status']}; verification is recorded only while the branch is explored")
             self._write_verification(run_id, branch, result.scores, result.verified, notes)
 
     def _write_verification(self, run_id: str, branch: dict[str, Any], scores: dict[str, float], verified: bool, notes: list[str]) -> None:

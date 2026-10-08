@@ -9,7 +9,7 @@ Judge evidence, not prose quality.
 
 ## Verification
 
-1. Use `branch_list` to load the stage candidates.
+1. Use `branch_list` to find the stage candidates, then `branch_view` on each for its proposal, risks, and recorded checks. `branch_list` returns summaries only.
 2. Check hard invariants first. For each invariant, run the test, benchmark, or inspection that decides it and call `check_record` with the result, pass or fail. Name the invariant by its exact text.
 3. Rank evidence: machine checks; reproducible tests; artifact inspection; primary sources; corroborated analysis; model opinion.
 4. Identify the earliest consequential disagreement and the smallest experiment capable of resolving it.
