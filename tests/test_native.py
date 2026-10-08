@@ -168,7 +168,7 @@ class NativeToolsTests(unittest.TestCase):
 
         server = build_server()
         names = {tool.name for tool in server._tool_manager.list_tools()}
-        self.assertEqual(len(names), 22)
+        self.assertEqual(len(names), 21)
         self.assertIn("run_status", names)
         self.assertIn("branch_fail", names)
         prompts = {prompt.name for prompt in server._prompt_manager.list_prompts()}

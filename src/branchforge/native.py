@@ -1,12 +1,5 @@
 from __future__ import annotations
 
-import json
-import os
-import shlex
-import signal
-import subprocess
-import tempfile
-import time
 from contextlib import contextmanager
 from dataclasses import asdict
 from pathlib import Path
@@ -27,107 +20,6 @@ from .models import (
 )
 from .repository import BranchRepository
 from .store import EventStore
-
-
-CHECKS_FILE_FLAG = "BRANCHFORGE_CHECKS_FILE"
-LOG_TAIL = 600
-MAX_TIMEOUT_SECONDS = 3600
-MAX_LOG_BYTES = 1024 * 1024
-MAX_OUTPUT_BYTES = 64 * 1024 * 1024
-
-
-def _allowed_checks(project: Path) -> tuple[dict[str, dict[str, Any]], list[Path]]:
-    """Load the commands the user allows the server to run.
-
-    They come from a file the user names in the server's environment, never
-    from a tool argument or the project's own state, so an agent cannot author
-    or alter what gets executed. The file also lists the projects it applies
-    to: `project` arrives as a tool argument, so it is trusted only when the
-    user's file names it. Returns the checks and the extra directories the
-    user allows them to run in.
-    """
-    location = os.environ.get(CHECKS_FILE_FLAG)
-    if not location:
-        raise ValueError(
-            "Running check commands is off. The user enables it by listing allowed commands in a JSON file "
-            f"outside the project and setting {CHECKS_FILE_FLAG} to its path in the BranchForge MCP server's "
-            "environment. Until then, run the command yourself and report the result with check_record"
-        )
-    path = Path(location).expanduser().resolve()
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise ValueError(f"Cannot read the checks file {path}: {exc}") from exc
-    checks = data.get("checks") if isinstance(data, dict) else None
-    listed = data.get("projects") if isinstance(data, dict) else None
-    roots = data.get("workdir_roots", []) if isinstance(data, dict) else None
-    if not isinstance(checks, dict) or not all(
-        isinstance(paths, list) and all(isinstance(item, str) for item in paths) for paths in (listed, roots)
-    ):
-        raise ValueError(
-            'The checks file must look like {"projects": ["/absolute/project/path"], '
-            '"checks": {"<name>": {"command": ["program", "arg"]}}}, '
-            'with an optional "workdir_roots" list of directories'
-        )
-    projects = [Path(item).expanduser().resolve() for item in listed]
-    if any(path.is_relative_to(root) for root in projects):
-        raise ValueError(f"{CHECKS_FILE_FLAG} must point outside the project, where project edits cannot change it: {path}")
-    if project not in projects:
-        raise ValueError(
-            f"The checks file does not list this project: {project}. "
-            'The user adds its path under "projects" to allow checks to run there'
-        )
-    allowed: dict[str, dict[str, Any]] = {}
-    for name, spec in checks.items():
-        command = spec.get("command") if isinstance(spec, dict) else None
-        argv = shlex.split(command) if isinstance(command, str) else command
-        if not isinstance(argv, list) or not argv or not all(isinstance(item, str) for item in argv):
-            raise ValueError(f"Check {name!r} in the checks file needs a command")
-        allowed[name] = {"command": argv, "kind": spec.get("kind", "test")}
-    return allowed, [Path(item).expanduser().resolve() for item in roots]
-
-
-def _kill_group(process: subprocess.Popen[bytes]) -> None:
-    """Kill the check's whole process group, including children a finished check left behind."""
-    try:
-        if hasattr(os, "killpg"):
-            os.killpg(process.pid, signal.SIGKILL)
-        elif process.poll() is None:
-            process.kill()
-    except (ProcessLookupError, PermissionError):
-        pass  # The group is already gone.
-
-
-def _run_command(argv: list[str], directory: Path, timeout: float) -> tuple[int | None, bytes, str | None]:
-    """Run an allowed check without a shell.
-
-    Returns the exit code, the tail of the output, and why the check was
-    stopped early, if it was. Output goes to an unnamed temporary file, so it
-    costs no memory and leaves no reader waiting on a child that keeps the
-    stream open.
-    """
-    with tempfile.TemporaryFile() as log:
-        process = subprocess.Popen(
-            argv, cwd=directory, stdin=subprocess.DEVNULL,
-            stdout=log, stderr=subprocess.STDOUT, start_new_session=True,
-        )
-        deadline = time.monotonic() + timeout
-        stopped: str | None = None
-        while stopped is None:
-            try:
-                process.wait(timeout=0.05)
-                break
-            except subprocess.TimeoutExpired:
-                if time.monotonic() >= deadline:
-                    stopped = f"timed out after {timeout:g}s"
-                elif os.fstat(log.fileno()).st_size > MAX_OUTPUT_BYTES:
-                    stopped = f"exceeded the {MAX_OUTPUT_BYTES // (1024 * 1024)} MB output limit"
-        _kill_group(process)
-        process.wait()
-        size = os.fstat(log.fileno()).st_size
-        log.seek(max(0, size - MAX_LOG_BYTES))
-        output = log.read(MAX_LOG_BYTES)
-    return (None if stopped else process.returncode), output, stopped
 
 
 def _choice(value: str, allowed: list[str], name: str) -> str:
@@ -239,21 +131,8 @@ class BranchForgeTools:
         invariants: list[str] | None = None,
         rubric: dict[str, float] | None = None,
         evidence_policy: str | None = None,
-        checks: list[dict[str, str]] | None = None,
     ) -> dict[str, Any]:
         _choice(mode, [item.value for item in BranchMode], "mode")
-        references: list[dict[str, str]] = []
-        if checks:
-            allowed, _ = _allowed_checks(self.cwd)
-            for item in checks:
-                if "command" in item:
-                    raise ValueError(
-                        "A stage cannot supply a command. Reference a check by name; "
-                        "the command comes from the user's checks file"
-                    )
-                if item.get("name") not in allowed:
-                    raise ValueError(f"Unknown check {item.get('name')!r}. Allowed checks: {', '.join(allowed) or 'none'}")
-                references.append({key: item[key] for key in ("name", "invariant") if item.get(key)})
         stage = StageSpec(
             name=name,
             objective=objective,
@@ -261,9 +140,7 @@ class BranchForgeTools:
             invariants=invariants or [],
             mode=BranchMode(mode),
             rubric=rubric or StageSpec(name, objective).rubric,
-            # Software branches can run their checks, so they must show the results.
-            evidence_policy=evidence_policy or ("observed" if mode == BranchMode.SOFTWARE.value else "judged"),
-            checks=references,
+            evidence_policy=evidence_policy,
         )
         if not stage.rubric or any(weight < 0 for weight in stage.rubric.values()):
             raise ValueError("Rubric weights must be non-negative")
@@ -440,7 +317,7 @@ class BranchForgeTools:
         artifact_id: str | None = None,
         details: str = "",
     ) -> dict[str, Any]:
-        """Record what a test, benchmark, or inspection showed. The caller ran it; this stores the result."""
+        """Record what a test, benchmark, or inspection showed. The caller ran it; BranchForge never executes commands."""
         check = Check(
             branch_id, name, passed, kind=kind, invariant=invariant, command=command,
             exit_code=exit_code, artifact_id=artifact_id, details=details,
@@ -449,68 +326,6 @@ class BranchForgeTools:
             repository.record_check(run_id, check)
             repository.render_branch(branch_id)
             return asdict(check)
-
-    def check_run(
-        self,
-        run_id: str,
-        branch_id: str,
-        name: str,
-        *,
-        workdir: str | None = None,
-        timeout_seconds: float = 600.0,
-    ) -> dict[str, Any]:
-        """Run a check the user allowed and the stage referenced, and record what it did. Exit code 0 passes."""
-        allowed, workdir_roots = _allowed_checks(self.cwd)
-        if not 0 < timeout_seconds <= MAX_TIMEOUT_SECONDS:
-            raise ValueError(f"timeout_seconds must be positive and at most {MAX_TIMEOUT_SECONDS}")
-        with self._repository() as repository:
-            branch = self._require_branch(repository, run_id, branch_id)
-            if branch["status"] not in {BranchStatus.ADMITTED.value, BranchStatus.RUNNING.value, BranchStatus.EXPLORED.value}:
-                raise ValueError(f"Branch is {branch['status']}; checks run before verification")
-            stage = repository.get_stage(run_id, branch["stage"]) or {}
-            declared = {item["name"]: item for item in stage.get("checks", [])}
-            if name not in declared:
-                raise ValueError(f"Unknown check {name!r}. Declared checks: {', '.join(declared) or 'none'}")
-        if name not in allowed:
-            raise ValueError(f"Check {name!r} is no longer in the checks file, so it cannot run")
-        # The command comes from the user's file at run time, never from stored state.
-        argv: list[str] = allowed[name]["command"]
-        directory = self._check_directory(workdir, workdir_roots)
-        try:
-            # No database connection is held while the command runs.
-            exit_code, output, stopped = _run_command(argv, directory, timeout_seconds)
-        except OSError as exc:
-            raise ValueError(f"Cannot start check {name!r}: {exc}") from exc
-        tail = output.decode(errors="replace")[-LOG_TAIL:].strip()
-        with self._repository() as repository:
-            with repository.store.atomic():
-                artifact = repository.store_artifact(run_id, branch_id, output, role="check-log", media_type="text/plain")
-                check = Check(
-                    branch_id, name, exit_code == 0 and stopped is None, kind=allowed[name]["kind"],
-                    invariant=declared[name].get("invariant"), command=shlex.join(argv), exit_code=exit_code,
-                    artifact_id=artifact.id, executed=True, workdir=str(directory),
-                    details=f"{stopped}\n{tail}".strip() if stopped else tail,
-                )
-                repository.record_check(run_id, check)
-            repository.render_branch(branch_id)
-            return asdict(check)
-
-    def _check_directory(self, workdir: str | None, workdir_roots: list[Path]) -> Path:
-        if not workdir:
-            return self.cwd
-        directory = (self.cwd / workdir).resolve()
-        if not directory.is_dir():
-            raise ValueError(f"Not a directory: {directory}")
-        if directory.is_relative_to(self.cwd):
-            return directory
-        # Only the user's own list widens this. Anything the project can assert about
-        # itself, such as a git worktree registration, is writable by the agent.
-        if any(directory.is_relative_to(root) for root in workdir_roots):
-            return directory
-        raise ValueError(
-            f"{directory} is outside the project and not under a directory the user listed in the "
-            'checks file ("workdir_roots"); run the check inside the project instead'
-        )
 
     def claim_record(self, run_id: str, branch_id: str, statement: str, *, kind: str = "claim", status: str = "open") -> dict[str, Any]:
         claim = Claim(branch_id, statement, kind=kind, status=status)

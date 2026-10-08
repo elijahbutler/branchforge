@@ -42,7 +42,7 @@ TRANSITIONS: dict[BranchStatus, set[BranchStatus]] = {
 }
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 1
 TERMINAL = {BranchStatus.PRUNED, BranchStatus.FAILED, BranchStatus.COMMITTED}
 UNFINISHED = {BranchStatus.PROPOSED, BranchStatus.ADMITTED, BranchStatus.RUNNING}
 EVENT_TYPES = {
@@ -182,9 +182,6 @@ class BranchRepository:
             ])
             # Columns added after the first release; older databases gain them here.
             self._add_column("stages", "evidence_policy", "TEXT NOT NULL DEFAULT 'judged'")
-            self._add_column("stages", "checks", "TEXT NOT NULL DEFAULT '[]'")
-            self._add_column("checks", "executed", "INTEGER NOT NULL DEFAULT 0")
-            self._add_column("checks", "workdir", "TEXT")
             self._write(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     def _add_column(self, table: str, column: str, definition: str) -> None:
@@ -330,21 +327,6 @@ class BranchRepository:
     def create_stage(self, run_id: str, stage: StageSpec) -> None:
         if stage.evidence_policy not in EVIDENCE_POLICIES:
             raise ValueError(f"evidence_policy must be one of: {', '.join(EVIDENCE_POLICIES)}")
-        names: set[str] = set()
-        for declared in stage.checks:
-            name = declared.get("name", "").strip()
-            if not name:
-                raise ValueError("Each declared check needs a name")
-            if "command" in declared:
-                raise ValueError("Declared checks name a check; the command lives in the user's checks file")
-            if name in names:
-                raise ValueError(f"Declared check names must be unique: {name}")
-            names.add(name)
-            if declared.get("invariant") and declared["invariant"] not in stage.invariants:
-                raise ValueError(
-                    f"Check {name!r} names an unknown invariant {declared['invariant']!r}. "
-                    f"This stage declares: {'; '.join(stage.invariants) or 'none'}"
-                )
         now = _now()
         with self.store.atomic():
             self._running_run(run_id)
@@ -352,11 +334,10 @@ class BranchRepository:
                 raise ValueError(f"Stage already exists in this run: {stage.name}")
             self._write(
                 """INSERT INTO stages(run_id, name, objective, deliverable, invariants, rubric, mode,
-                   status, evidence_policy, checks, created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   status, evidence_policy, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (run_id, stage.name, stage.objective, stage.deliverable, _json(stage.invariants),
-                 _json(stage.rubric), stage.mode.value, "running", stage.evidence_policy,
-                 _json(stage.checks), now, now),
+                 _json(stage.rubric), stage.mode.value, "running", stage.evidence_policy, now, now),
             )
             self._event(run_id, "STAGE_STARTED", asdict(stage), stage=stage.name)
 
@@ -425,7 +406,6 @@ class BranchRepository:
         for item in result:
             item["invariants"] = json.loads(item["invariants"])
             item["rubric"] = json.loads(item["rubric"])
-            item["checks"] = json.loads(item["checks"])
         return result
 
     def get_stage(self, run_id: str, name: str) -> dict[str, Any] | None:
@@ -466,28 +446,16 @@ class BranchRepository:
                             "fix it and record a passing check, or prune it."
                         )
                     elif missing and stage["evidence_policy"] == "observed":
-                        # An invariant with a declared check accepts only an executed result.
-                        declared = {
-                            item["invariant"]: item["name"] for item in stage["checks"] if item.get("invariant")
-                        }
-                        runnable = [declared[item] for item in missing if item in declared]
-                        reportable = [item for item in missing if item not in declared]
-                        if runnable:
-                            next_actions.append(
-                                f"Run check_run for branch {branch['branch_id']} with each of these checks: "
-                                f"{', '.join(runnable)}."
-                            )
-                        if reportable:
-                            next_actions.append(
-                                f"Record a check_record result for each unchecked invariant of branch "
-                                f"{branch['branch_id']}: {', '.join(reportable)}."
-                            )
+                        next_actions.append(
+                            f"Record a check_record result for each unchecked invariant of branch "
+                            f"{branch['branch_id']}: {', '.join(missing)}."
+                        )
                     elif stage["evidence_policy"] == "observed" and not any(
                         check["passed"] for check in self.checks(branch["branch_id"])
                     ):
                         next_actions.append(
                             f"Record at least one passing check for branch {branch['branch_id']} with "
-                            "check_record or check_run before verifying it."
+                            "check_record before verifying it."
                         )
                     else:
                         next_actions.append(f"Verify or prune explored branch {branch['branch_id']}.")
@@ -682,7 +650,7 @@ class BranchRepository:
             self._event(run_id, "EVIDENCE_RECORDED", asdict(evidence), stage=branch["stage"], branch_id=evidence.branch_id)
 
     def record_check(self, run_id: str, check: Check) -> None:
-        """Record an observed pass or fail. The latest check per invariant decides verification."""
+        """Record a reported pass or fail. The latest check per invariant decides verification."""
         if check.kind not in CHECK_KINDS:
             raise ValueError(f"Check kind must be one of: {', '.join(CHECK_KINDS)}")
         if not check.name.strip():
@@ -700,20 +668,13 @@ class BranchRepository:
             if check.invariant and check.invariant not in invariants:
                 declared = "; ".join(invariants) or "none declared"
                 raise ValueError(f"Unknown invariant {check.invariant!r}. This stage declares: {declared}")
-            declared = [item["name"] for item in (stage["checks"] if stage else []) if item.get("invariant") == check.invariant]
-            if check.invariant and declared and not check.executed:
-                raise ValueError(
-                    f"Invariant {check.invariant!r} is decided by a declared command; "
-                    f"run it with check_run (check name: {', '.join(declared)}) instead of reporting a result"
-                )
             self._require_record("artifacts", "artifact_id", check.artifact_id, run_id, "artifact")
             self._write(
                 """INSERT INTO checks(check_id, run_id, branch_id, name, kind, passed, invariant,
-                   command, exit_code, artifact_id, details, executed, workdir, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   command, exit_code, artifact_id, details, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (check.id, run_id, check.branch_id, check.name, check.kind, int(check.passed),
-                 check.invariant, check.command, check.exit_code, check.artifact_id, check.details,
-                 int(check.executed), check.workdir, _now()),
+                 check.invariant, check.command, check.exit_code, check.artifact_id, check.details, _now()),
             )
             self._event(run_id, "CHECK_RECORDED", asdict(check), stage=branch["stage"], branch_id=check.branch_id)
 
@@ -804,7 +765,7 @@ class BranchRepository:
             for key in ("revisit_if", "metadata"):
                 if key in item and isinstance(item[key], str):
                     item[key] = json.loads(item[key])
-            for key in ("observed", "passed", "executed"):
+            for key in ("observed", "passed"):
                 if key in item:
                     item[key] = bool(item[key])
         return result

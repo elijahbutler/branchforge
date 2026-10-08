@@ -24,7 +24,7 @@ Every MCP tool accepts an optional `cwd`. State is stored under that project at 
 | `repository.py` | Schema, migrations, and every lifecycle rule |
 | `dossier.py` | Renders run and branch files from repository state |
 | `native.py` | Agent-facing operations: input validation and compact responses |
-| `mcp_server.py` | MCP tool schemas, descriptions, and annotations over `native.py` |
+| `mcp_server.py` | MCP tool schemas, descriptions, and annotations over `native.py`. Tools that close a run or branch are marked destructive |
 | `orchestrator.py` | Headless model loop, writing through the same repository rules |
 
 The agent-native tools and the headless kernel both call `BranchRepository`. A rule placed there holds for both.
@@ -38,7 +38,7 @@ Skills describe the workflow. These rules do not depend on an agent following th
 - **A stage commit is all or nothing.** Pruning the losers, committing the winner, recording the decision, and closing the stage happen in one transaction.
 - **Admission has a budget.** A stage round admits at most `max_branches` branches, rounds stop at `max_rounds`, and two admitted branches in a round cannot share a title.
 - **A failed check blocks verification.** The latest `check_record` result for each invariant decides. A verifier cannot mark a branch verified over a failed invariant check.
-- **Only user-allowed commands are run.** The user lists named check commands, and the projects they apply to, in a JSON file outside those projects and points `BRANCHFORGE_CHECKS_FILE` at it. The `cwd` tool argument is honored for checks only when the file lists it. A stage references checks by name and cannot supply a command. `check_run` reads the command from that file at run time, runs it without a shell in the branch's directory, stores the log as an artifact, and records pass or fail from the exit code. For an invariant with a referenced check, a reported result is refused.
+- **BranchForge runs no commands.** `check_record` stores a result the host observed. The server never executes a command, so a project's state cannot make it run anything.
 - **Observed stages need passing checks.** With `evidence_policy` `observed`, the default for software stages, a branch verifies only after a passing check for every invariant.
 - **Scores follow the rubric.** `branch_verify` accepts a 0 to 1 score per rubric criterion and applies the stage weights itself.
 - **References must exist.** Evidence, findings, and checks cannot cite a claim, evidence record, or artifact that is not in the run.
@@ -104,7 +104,7 @@ BranchForge persists:
 - runs and stage specs;
 - branch lineage and lifecycle status;
 - claims and evidence;
-- checks, each a pass or fail with its command, exit code, invariant, and whether BranchForge ran it or a caller reported it;
+- checks, each a reported pass or fail with its command, exit code, and invariant;
 - reusable findings;
 - content-addressed artifacts;
 - rendered decision records and branch dossiers.
@@ -122,13 +122,9 @@ Artifacts are stored by SHA-256 under `.branchforge/objects`. Dossiers are rende
 
 ## Current Limitations
 
-- Check execution is off by default. Without it the host runs the command and reports the outcome through `check_record`, so a check is only as honest as the agent recording it.
-- `check_run` runs the command with the server's own permissions and environment, not in a sandbox. An allowed command such as a test runner executes code from the branch's directory, which the agent wrote. Allow only commands you would let the agent run anyway.
-- The agent chooses the directory a check runs in, within the project and the directories the user listed. A check can therefore pass against a directory that does not hold the branch's work. Each executed check records its directory, and the dossier prints it, so a reviewer can tell.
-- The check's output is stored as an artifact in the project. A command that prints secrets from the environment leaves them there.
-- The state database and dossiers live in the project, where the agent can write. An agent that edits `.branchforge/state.db` directly can forge any record, including an executed check. The rules stop an agent's mistakes and shortcuts through the tools. They do not stop an agent that sets out to falsify the record.
-- An agent with unrestricted shell access could edit the checks file itself. The file's protection is the host's permission prompt for writes outside the project.
-- The headless kernel cannot execute anything, so its stages are always `judged`.
+- Checks are reported, not run, by BranchForge. The host runs the command and reports the outcome through `check_record`, so a check is only as honest as the agent recording it.
+- The state database and dossiers live in the project, where the agent can write. An agent that edits `.branchforge/state.db` directly can forge any record. The rules stop an agent's mistakes and shortcuts through the tools. They do not stop an agent that sets out to falsify the record.
+- The headless kernel cannot run or record checks. It refuses an `observed` stage, so a headless software stage must set `evidence_policy` to `judged` explicitly.
 - The event log is an audit trail. State is not rebuilt from it.
 - `survivor_width` and `novelty_threshold` bind the headless kernel only.
 - Branches cannot yet create isolated runtime workspaces through the Python kernel.

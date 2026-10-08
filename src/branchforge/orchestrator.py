@@ -59,6 +59,13 @@ class BranchForge:
 
     async def _run_stage(self, run_id: str, goal: str, stage: StageSpec, context: str) -> StageOutcome:
         self.repository.create_stage(run_id, stage)
+        if stage.evidence_policy == "observed":
+            # Fail before spending model calls on branches that can never verify.
+            raise RuntimeError(
+                f"Stage {stage.name!r} requires observed checks, and the headless kernel cannot run or record "
+                "checks. Run it through the agent-native tools, or set evidence_policy to 'judged' to accept "
+                "model verification"
+            )
         survivors: list[BranchResult] = []
         for round_number in range(self.config.max_rounds):
             round_context = context

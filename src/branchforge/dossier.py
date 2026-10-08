@@ -32,8 +32,7 @@ def _dump(value: Any) -> str:
 
 def _check_line(check: dict[str, Any]) -> str:
     target = f" for {check['invariant']}" if check["invariant"] else ""
-    source = f"run by BranchForge in {check.get('workdir')}" if check.get("executed") else "reported"
-    return f"- {'pass' if check['passed'] else 'FAIL'}: {check['name']} ({check['kind']}, {source}){target}"
+    return f"- {'pass' if check['passed'] else 'FAIL'}: {check['name']} ({check['kind']}, reported){target}"
 
 
 def render_run(repository: BranchRepository, run_id: str) -> Path:

@@ -31,6 +31,7 @@ def parser() -> argparse.ArgumentParser:
     run.add_argument("--rounds", type=int, default=1)
     run.add_argument("--mode", choices=[mode.value for mode in BranchMode], default=BranchMode.HYBRID.value)
     run.add_argument("--stage-mode", action="append", choices=[mode.value for mode in BranchMode], default=[], help="Mode for each --stage; repeat in stage order")
+    run.add_argument("--evidence-policy", choices=["observed", "judged"], help="Default: observed for software stages, judged otherwise. The headless kernel cannot record checks, so software stages need judged")
     inspect = commands.add_parser("inspect", help="Print a run's event history")
     inspect.add_argument("run_id", nargs="?")
     status = commands.add_parser("status", help="Summarize run progress, blockers, and next actions")
@@ -121,7 +122,10 @@ async def execute(args: argparse.Namespace) -> int:
         if not stage_modes:
             stage_modes = [args.mode] * len(stage_names)
         stages = [
-            StageSpec(f"stage-{index}", objective, mode=BranchMode(stage_modes[index - 1]))
+            StageSpec(
+                f"stage-{index}", objective, mode=BranchMode(stage_modes[index - 1]),
+                evidence_policy=args.evidence_policy,
+            )
             for index, objective in enumerate(stage_names, 1)
         ]
         outcomes = await BranchForge(provider, store, config, judge_provider=judge, repository=repository).run(args.goal, stages)

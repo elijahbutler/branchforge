@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from branchforge.models import BranchResult, Hypothesis, RunConfig, StageSpec
+from branchforge.models import BranchMode, BranchResult, Hypothesis, RunConfig, StageSpec
 from branchforge.native import BranchForgeTools
 from branchforge.orchestrator import BranchForge
 from branchforge.providers import MockProvider
@@ -196,28 +196,6 @@ class ObservedEvidenceTests(LifecycleCase):
         with self.assertRaisesRegex(ValueError, "Tenant isolation"):
             self.tools.check_record(run_id, branch_id, "test", True, invariant="Tenant isolaton")
 
-    def test_run_status_points_to_check_run_for_an_invariant_with_a_declared_check(self):
-        with tempfile.TemporaryDirectory() as config:
-            checks_file = Path(config) / "checks.json"
-            checks_file.write_text(json.dumps({
-                "projects": [str(self.root.resolve())],
-                "checks": {"isolation": {"command": [sys.executable, "-c", "pass"]}},
-            }))
-            with mock.patch.dict(os.environ, {"BRANCHFORGE_CHECKS_FILE": str(checks_file)}):
-                run_id = self.tools.run_create("Goal")["run_id"]
-                self.tools.stage_create(
-                    run_id, "stage", "Objective", mode="software",
-                    invariants=["Tenant isolation", "Idempotent writes"],
-                    checks=[{"name": "isolation", "invariant": "Tenant isolation"}],
-                )
-        branch_id = self.explored(run_id)
-        actions = " ".join(self.tools.run_status(run_id)["next_actions"])
-        self.assertIn("check_run", actions)
-        self.assertIn("isolation", actions)
-        self.assertRegex(actions, r"check_record[^.]*Idempotent writes")
-        self.assertNotRegex(actions, r"check_record[^.]*Tenant isolation")
-        self.assertIn(branch_id, actions)
-
     def test_run_status_asks_for_a_check_before_verification_when_none_passed(self):
         run_id = self.run_with_stage(mode="software")
         branch_id = self.explored(run_id)
@@ -310,6 +288,38 @@ class DossierTests(LifecycleCase):
         self.assertIn("Recovery exceeded the time objective", decision)
         checks = json.loads((run_dir / "branches" / winner / "CHECKS.json").read_text())
         self.assertEqual(checks[0]["invariant"], "Tenant isolation")
+
+
+class EvidencePolicyDefaultTests(unittest.TestCase):
+    def test_stage_spec_derives_the_policy_from_the_mode(self):
+        self.assertEqual(StageSpec("s", "o", mode=BranchMode.SOFTWARE).evidence_policy, "observed")
+        self.assertEqual(StageSpec("s", "o", mode=BranchMode.RESEARCH).evidence_policy, "judged")
+        self.assertEqual(StageSpec("s", "o").evidence_policy, "judged")
+
+    def test_stage_spec_keeps_an_explicit_policy(self):
+        spec = StageSpec("s", "o", mode=BranchMode.SOFTWARE, evidence_policy="judged")
+        self.assertEqual(spec.evidence_policy, "judged")
+
+    def headless(self, stage):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        store = EventStore(Path(directory.name) / "events.db")
+        self.addCleanup(store.close)
+        forge = BranchForge(MockProvider(), store, RunConfig(max_rounds=1))
+        return forge, store, lambda: asyncio.run(forge.run("Goal", [stage]))
+
+    def test_headless_software_stage_cannot_commit_without_checks(self):
+        forge, store, run = self.headless(StageSpec("build", "Objective", mode=BranchMode.SOFTWARE))
+        with self.assertRaisesRegex(RuntimeError, "cannot run or record checks"):
+            run()
+        run_id = store.run_ids()[0]
+        self.assertEqual(forge.repository.get_run(run_id)["status"], "failed")
+        self.assertEqual(forge.repository.branches(run_id), [])
+
+    def test_headless_software_stage_runs_when_judged_is_chosen_explicitly(self):
+        stage = StageSpec("build", "Objective", mode=BranchMode.SOFTWARE, evidence_policy="judged")
+        forge, _, run = self.headless(stage)
+        self.assertTrue(run()[0].winner.verified)
 
 
 class StoreTests(unittest.TestCase):
@@ -417,6 +427,14 @@ class CliTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(list(Path(directory).iterdir()), [])
 
+    def test_software_run_needs_an_explicit_judged_policy(self):
+        with tempfile.TemporaryDirectory() as directory:
+            refused = self.cli(directory, "run", "Goal", "--mode", "software")
+            self.assertEqual(refused.returncode, 1)
+            self.assertIn("cannot run or record checks", refused.stderr)
+            allowed = self.cli(directory, "run", "Goal", "--mode", "software", "--evidence-policy", "judged")
+            self.assertEqual(allowed.returncode, 0, allowed.stderr)
+
     def test_invalid_arguments_print_one_line_without_a_traceback(self):
         with tempfile.TemporaryDirectory() as directory:
             result = self.cli(directory, "run", "Goal", "--branches", "1")
@@ -454,6 +472,14 @@ class McpSchemaTests(unittest.TestCase):
 
     def test_check_record_is_exposed(self):
         self.assertIn("check_record", self.tools)
+
+    def test_no_tool_executes_commands(self):
+        self.assertNotIn("check_run", self.tools)
+        self.assertNotIn("checks", self.tools["stage_create"].inputSchema["properties"])
+
+    def test_tools_that_close_a_run_or_branch_are_marked_destructive(self):
+        destructive = {name for name, tool in self.tools.items() if tool.annotations and tool.annotations.destructiveHint}
+        self.assertEqual(destructive, {"run_finish", "stage_commit", "branch_prune", "branch_fail"})
 
 
 if __name__ == "__main__":

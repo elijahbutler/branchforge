@@ -29,7 +29,6 @@ BranchForge spends parallel model inference only at consequential, uncertain dec
 - `branchforge status` and MCP `run_status` (R1), `branchforge doctor` (R3, partial)
 - Typed MCP schemas with parameter descriptions, enums, read-only annotations, and compact responses
 - Versioned SQLite schema with migration from the first release
-- Opt-in `check_run`: commands from a user-owned checks file outside the project, run without a shell, with logs kept as artifacts
 - CI on Python 3.11 and 3.14, with and without the MCP SDK
 
 ## Prioritized roadmap
@@ -71,7 +70,7 @@ finish.
 
 These were considered and left out. Each needs evidence or a decision first.
 
-- **Sandbox executed checks.** `check_run` runs commands from the user's checks file with the server's permissions. Containing them needs the M2 capability manifests and per-branch workspaces.
+- **Run checks inside BranchForge.** A `check_run` tool was built and then removed before merge. It executed commands from a user-owned file, and each review round still found a new way to widen what it could reach: the caller-supplied project directory, forgeable git worktree registrations, leaked child processes. A server that executes commands needs the M2 capability manifests and a sandbox first. Until then the host runs each check under its own permission prompts and reports the result with `check_record`.
 - **Collapse the seven skills into one with reference files.** Anthropic's skill guide favors one entry point with progressive disclosure. There are no evals to show the change helps, so build R4's evals first.
 - **Trim the tool list.** `branch_start` is optional and `run_view` overlaps `run_status`. Removing tools breaks installed skills; do it with the skill consolidation.
 - **Record who verified a branch.** The code cannot tell an explorer from an independent verifier. Needs a host-supplied agent identity.

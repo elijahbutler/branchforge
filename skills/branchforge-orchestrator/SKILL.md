@@ -16,7 +16,7 @@ the host actually provides it.
 
 ## For each stage
 
-1. Call `stage_create` with objective, mode, deliverable, invariants, and rubric. Write each invariant so a test, measurement, or inspection can decide it. Software stages default to `evidence_policy` `observed`. Set `observed` on any other stage whose invariants can be checked. When the user has allowed named check commands, reference the ones that decide an invariant in `checks` so BranchForge runs the same command against every branch. You cannot supply a command yourself. If `stage_create` answers that running commands is off or the name is unknown, omit `checks` and have explorers report results with `check_record`; do not ask the user to enable it unless they raise it.
+1. Call `stage_create` with objective, mode, deliverable, invariants, and rubric. Write each invariant so a test, measurement, or inspection can decide it. Software stages default to `evidence_policy` `observed`. Set `observed` on any other stage whose invariants can be checked.
 2. Generate two to four materially different, falsifiable hypotheses.
 3. Call `branch_add` for every candidate, including rejected admission candidates with `admit=false` when their rejection is informative.
 4. Load the matching phase skill:

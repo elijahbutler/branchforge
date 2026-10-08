@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-from functools import partial
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
 from .native import BranchForgeTools
 
 try:
-    import anyio
     from mcp.server.fastmcp import FastMCP
     from mcp.types import ToolAnnotations
     from pydantic import Field
@@ -45,6 +43,8 @@ def build_server() -> Any:
     server = FastMCP("branchforge")
     read = ToolAnnotations(readOnlyHint=True, openWorldHint=False)
     write = ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=False)
+    # Closing a run or branch cannot be undone, so hosts may want to confirm it.
+    terminal = ToolAnnotations(readOnlyHint=False, destructiveHint=True, openWorldHint=False)
     rerunnable = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False)
 
     @server.prompt()
@@ -56,8 +56,7 @@ Keep reasoning in the host and use the BranchForge MCP tools as authoritative st
 Call run_create, then create bounded stages. For each stage, persist two to four
 materially distinct hypotheses with branch_add and explore them independently.
 Run the tests, benchmarks, or inspections that bear on each stage invariant and
-record every result, pass or fail, with check_record. If the user allowed
-named check commands, reference them in stage_create and run them with check_run instead. Record results and evidence,
+record every result, pass or fail, with check_record. Record results and evidence,
 verify viable candidates, resolve every admitted branch, and commit only a
 verified winner. Finish with run_finish and report the dossier path.
 Never broaden the user's permissions through branching."""
@@ -87,7 +86,7 @@ Never broaden the user's permissions through branching."""
         """Summarize progress, blockers, and the next valid actions. Call this first when resuming a run."""
         return _tools(cwd).run_status(run_id)
 
-    @server.tool(annotations=write)
+    @server.tool(annotations=terminal)
     def run_finish(
         run_id: RunId,
         error: Annotated[str | None, Field(description="Omit to complete the run. Give a reason to fail it; open branches are closed with that reason.")] = None,
@@ -106,13 +105,12 @@ Never broaden the user's permissions through branching."""
         invariants: Annotated[list[str] | None, Field(description="Hard constraints every candidate must satisfy. check_record refers to these by exact text.")] = None,
         rubric: Annotated[dict[str, float] | None, Field(description="Criterion name to weight. Defaults to correctness 0.4, feasibility 0.25, simplicity 0.2, novelty 0.15.")] = None,
         evidence_policy: Annotated[EvidencePolicy | None, Field(description="observed: a branch verifies only after a passing check for every invariant. judged: the verifier decides, but a failed check still blocks. Defaults to observed for software stages, judged otherwise.")] = None,
-        checks: Annotated[list[dict[str, str]] | None, Field(description="Checks BranchForge runs through check_run, the same for every branch. Each item has name, plus optional invariant (exact text). A name must be one the user allowed in their checks file; you cannot supply a command. If the tool answers that running commands is off, omit this and report results with check_record.")] = None,
         cwd: Cwd = None,
     ) -> dict[str, Any]:
         """Create a bounded stage. Returns the stage record."""
-        return _tools(cwd).stage_create(run_id, name, objective, mode=mode, deliverable=deliverable, invariants=invariants, rubric=rubric, evidence_policy=evidence_policy, checks=checks)
+        return _tools(cwd).stage_create(run_id, name, objective, mode=mode, deliverable=deliverable, invariants=invariants, rubric=rubric, evidence_policy=evidence_policy)
 
-    @server.tool(annotations=write)
+    @server.tool(annotations=terminal)
     def stage_commit(
         run_id: RunId,
         stage: StageName,
@@ -184,27 +182,15 @@ Never broaden the user's permissions through branching."""
         name: Annotated[str, Field(description="What was checked, for example pytest tests/test_isolation.py.")],
         passed: Annotated[bool, Field(description="The observed outcome. Record failures too.")],
         kind: Annotated[CheckKind, Field(description="How the result was observed.")] = "test",
-        invariant: Annotated[str | None, Field(description="Exact text of the stage invariant this check decides. Omit for checks that inform the rubric only. Refused for an invariant that has a declared command; use check_run for those.")] = None,
+        invariant: Annotated[str | None, Field(description="Exact text of the stage invariant this check decides. Omit for checks that inform the rubric only.")] = None,
         command: Annotated[str | None, Field(description="Command that produced the result, so it can be rerun.")] = None,
         exit_code: Annotated[int | None, Field(description="Exit code of the command.")] = None,
         artifact_id: Annotated[str | None, Field(description="ID from artifact_store for the saved log or report.")] = None,
         details: Annotated[str, Field(description="Short summary of the output, such as counts or the measured value.")] = "",
         cwd: Cwd = None,
     ) -> dict[str, Any]:
-        """Record the result of a test, benchmark, static analysis, inspection, or source check you ran. The latest check per invariant decides whether branch_verify can pass; a failed one cannot be overridden."""
+        """Record the result of a test, benchmark, static analysis, inspection, or source check you ran. BranchForge stores the result and never runs the command. The latest check per invariant decides whether branch_verify can pass; a failed one cannot be overridden."""
         return _tools(cwd).check_record(run_id, branch_id, name, passed, kind=kind, invariant=invariant, command=command, exit_code=exit_code, artifact_id=artifact_id, details=details)
-
-    @server.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, openWorldHint=True))
-    async def check_run(
-        run_id: RunId,
-        branch_id: BranchId,
-        name: Annotated[str, Field(description="Name of a check the stage referenced in stage_create.")],
-        workdir: Annotated[str | None, Field(description="Directory holding this branch's work: a path inside cwd, or under a directory the user listed in their checks file. Defaults to cwd.")] = None,
-        timeout_seconds: Annotated[float, Field(description="Seconds before the command is killed and recorded as failed. At most 3600.")] = 600.0,
-        cwd: Cwd = None,
-    ) -> dict[str, Any]:
-        """Run a user-allowed check command in the branch's directory and record the result. BranchForge runs it, so the outcome does not depend on what an agent reports. Returns pass or fail, the exit code, and the tail of the output; the full log is stored as an artifact."""
-        return await anyio.to_thread.run_sync(partial(_tools(cwd).check_run, run_id, branch_id, name, workdir=workdir, timeout_seconds=timeout_seconds))
 
     @server.tool(annotations=write)
     def branch_verify(
@@ -218,7 +204,7 @@ Never broaden the user's permissions through branching."""
         """Record independent verification of an explored branch. verified=true is refused while an invariant check has failed, and in observed stages until every invariant has a passing check."""
         return _tools(cwd).branch_verify(run_id, branch_id, verified=verified, scores=scores, notes=notes)
 
-    @server.tool(annotations=write)
+    @server.tool(annotations=terminal)
     def branch_prune(
         run_id: RunId,
         branch_id: BranchId,
@@ -228,7 +214,7 @@ Never broaden the user's permissions through branching."""
         """Reject a branch that lost or was falsified. Terminal."""
         return _tools(cwd).branch_prune(run_id, branch_id, reason)
 
-    @server.tool(annotations=write)
+    @server.tool(annotations=terminal)
     def branch_fail(
         run_id: RunId,
         branch_id: BranchId,

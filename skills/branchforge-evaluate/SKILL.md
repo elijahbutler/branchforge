@@ -10,7 +10,7 @@ Judge evidence, not prose quality.
 ## Verification
 
 1. Use `branch_list` to load the stage candidates.
-2. Check hard invariants first. For each invariant, run the test, benchmark, or inspection that decides it and call `check_record` with the result, pass or fail. Name the invariant by its exact text. When the stage declared a command for the invariant, run it with `check_run` instead; a reported result is refused for those.
+2. Check hard invariants first. For each invariant, run the test, benchmark, or inspection that decides it and call `check_record` with the result, pass or fail. Name the invariant by its exact text.
 3. Rank evidence: machine checks; reproducible tests; artifact inspection; primary sources; corroborated analysis; model opinion.
 4. Identify the earliest consequential disagreement and the smallest experiment capable of resolving it.
 5. Call `branch_verify` with a 0 to 1 score per rubric criterion, notes, and `verified=true` only when the evidence supports it. The stage rubric applies the weights.

@@ -52,11 +52,14 @@ class StageSpec:
         }
     )
     # "observed" stages verify a branch only after a recorded check passes for
-    # every invariant; "judged" stages accept the verifier's judgment.
-    evidence_policy: str = "judged"
-    # Checks the server may run with check_run, by name: {"name"} plus an optional
-    # "invariant". The commands live in the user's checks file, not here.
-    checks: list[dict[str, str]] = field(default_factory=list)
+    # every invariant; "judged" stages accept the verifier's judgment. Left
+    # unset, software stages are observed and the rest judged, whichever way
+    # the stage is built.
+    evidence_policy: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.evidence_policy is None:
+            self.evidence_policy = "observed" if self.mode == BranchMode.SOFTWARE else "judged"
 
 
 @dataclass(slots=True)
@@ -139,7 +142,7 @@ class Evidence:
 
 @dataclass(slots=True)
 class Check:
-    """One observed result: a command, measurement, or inspection that passed or failed."""
+    """One reported result: a command, measurement, or inspection that passed or failed."""
 
     branch_id: str
     name: str
@@ -150,10 +153,6 @@ class Check:
     exit_code: int | None = None
     artifact_id: str | None = None
     details: str = ""
-    # True when the server ran the command itself, False when a caller reported the result.
-    executed: bool = False
-    # Where an executed check ran, so a reader can confirm it tested this branch's work.
-    workdir: str | None = None
     id: str = field(default_factory=lambda: new_id("check"))
 
 
