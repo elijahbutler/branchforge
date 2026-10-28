@@ -284,6 +284,7 @@ class ResponseShapeTests(LifecycleCase):
         self.assertEqual(self.tools.branch_list(run_id, detail=True)[0]["proposal"], "Proposal")
 
     def test_unknown_run_is_an_error_not_an_empty_list(self):
+        self.tools.run_create("Goal")
         with self.assertRaisesRegex(ValueError, "Unknown run"):
             self.tools.branch_list("run_typo")
 
@@ -310,6 +311,27 @@ class DossierTests(LifecycleCase):
         self.assertIn("Recovery exceeded the time objective", decision)
         checks = json.loads((run_dir / "branches" / winner / "CHECKS.json").read_text())
         self.assertEqual(checks[0]["invariant"], "Tenant isolation")
+
+
+class ReadOnlyToolTests(LifecycleCase):
+    def test_read_tools_leave_a_clean_project_untouched(self):
+        status = self.tools.run_status()
+        self.assertIsNone(status["run"])
+        for call in (
+            lambda: self.tools.run_status("run_missing"),
+            lambda: self.tools.run_view("run_missing"),
+            lambda: self.tools.branch_view("branch_missing"),
+            lambda: self.tools.branch_list("run_missing"),
+            lambda: self.tools.tree_view("run_missing"),
+        ):
+            with self.assertRaisesRegex(ValueError, "run_create"):
+                call()
+        self.assertEqual(list(self.root.iterdir()), [])
+
+    def test_read_tools_work_once_state_exists(self):
+        run_id = self.run_with_stage()
+        self.assertEqual(self.tools.run_status()["run"]["run_id"], run_id)
+        self.assertEqual(self.tools.run_view(run_id)["run"]["run_id"], run_id)
 
 
 class EvidencePolicyDefaultTests(unittest.TestCase):

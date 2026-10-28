@@ -42,7 +42,10 @@ class BranchForgeTools:
         self.database = self.state_dir / "state.db"
 
     @contextmanager
-    def _repository(self) -> Iterator[BranchRepository]:
+    def _repository(self, *, create: bool = True) -> Iterator[BranchRepository]:
+        # Read-only tools pass create=False so inspecting a project never adds files to it.
+        if not create and not self.database.exists():
+            raise ValueError(f"No BranchForge state in {self.cwd}. Create a run with run_create first.")
         self.state_dir.mkdir(parents=True, exist_ok=True)
         store = EventStore(self.database)
         try:
@@ -92,7 +95,7 @@ class BranchForgeTools:
             return repository.get_run(run_id) or {}
 
     def run_view(self, run_id: str) -> dict[str, Any]:
-        with self._repository() as repository:
+        with self._repository(create=False) as repository:
             run = repository.get_run(run_id)
             if run is None:
                 raise ValueError(f"Unknown run: {run_id}")
@@ -100,19 +103,25 @@ class BranchForgeTools:
 
     def run_status(self, run_id: str | None = None) -> dict[str, Any]:
         """Summarize run progress, blockers, and safe next actions."""
-        with self._repository() as repository:
+        if run_id is None and not self.database.exists():
+            return self._no_runs()
+        with self._repository(create=False) as repository:
             selected = run_id
             if selected is None:
                 selected = next(iter(repository.store.run_ids()), None)
                 if selected is None:
-                    return {
-                        "run": None,
-                        "stages": [],
-                        "blockers": ["No BranchForge runs found."],
-                        "next_actions": ["Create a run with run_create."],
-                        "finishable": False,
-                    }
+                    return self._no_runs()
             return repository.run_status(selected)
+
+    @staticmethod
+    def _no_runs() -> dict[str, Any]:
+        return {
+            "run": None,
+            "stages": [],
+            "blockers": ["No BranchForge runs found."],
+            "next_actions": ["Create a run with run_create."],
+            "finishable": False,
+        }
 
     def run_finish(self, run_id: str, *, error: str | None = None) -> dict[str, Any]:
         with self._repository() as repository:
@@ -207,7 +216,7 @@ class BranchForgeTools:
             return self._summary(repository, repository.get_branch(hypothesis.id) or {})
 
     def branch_view(self, branch_id: str) -> dict[str, Any]:
-        with self._repository() as repository:
+        with self._repository(create=False) as repository:
             branch = repository.get_branch(branch_id)
             if branch is None:
                 raise ValueError(f"Unknown branch: {branch_id}")
@@ -223,7 +232,7 @@ class BranchForgeTools:
     ) -> list[dict[str, Any]]:
         if status:
             _choice(status, [item.value for item in BranchStatus], "status")
-        with self._repository() as repository:
+        with self._repository(create=False) as repository:
             if repository.get_run(run_id) is None:
                 raise ValueError(f"Unknown run: {run_id}")
             branches = repository.branches(run_id)
@@ -394,7 +403,7 @@ class BranchForgeTools:
 
     def tree_view(self, run_id: str, *, fmt: str = "compact") -> str | dict[str, Any]:
         _choice(fmt, ["compact", "markdown", "json"], "fmt")
-        with self._repository() as repository:
+        with self._repository(create=False) as repository:
             if repository.get_run(run_id) is None:
                 raise ValueError(f"Unknown run: {run_id}")
             tree = repository.tree(run_id)
