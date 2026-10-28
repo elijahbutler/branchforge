@@ -43,29 +43,52 @@ if ! "$server" --help >/dev/null; then
 fi
 
 install_codex() {
-  command -v codex >/dev/null || { echo "codex is not installed" >&2; return 1; }
   codex mcp remove branchforge >/dev/null 2>&1 || true
   codex mcp add branchforge -- "$server" mcp
   echo "Registered BranchForge MCP with Codex"
 }
 
-install_claude() {
-  command -v claude >/dev/null || { echo "claude is not installed" >&2; return 1; }
+install_claude_code() {
   claude mcp remove branchforge -s user >/dev/null 2>&1 || true
   claude mcp add -s user branchforge -- "$server" mcp
   echo "Registered BranchForge MCP with Claude Code"
+}
+
+install_claude_desktop() {
   "$venv/bin/python" "$repo_root/scripts/install-claude-desktop.py" "$server" \
     --runtime-source "$repo_root"
   echo "Registered BranchForge MCP with Claude Desktop"
 }
 
-case "$platform" in
-  codex) install_codex ;;
-  claude) install_claude ;;
-  all)
-    install_codex
-    install_claude
-    ;;
-esac
+# Register with every requested host that is present, and skip the rest.
+targets=()
+if [[ "$platform" != "claude" ]]; then
+  if command -v codex >/dev/null; then
+    targets+=(codex)
+  else
+    echo "Skipped Codex: codex is not on PATH"
+  fi
+fi
+if [[ "$platform" != "codex" ]]; then
+  if command -v claude >/dev/null; then
+    targets+=(claude_code)
+  else
+    echo "Skipped Claude Code: claude is not on PATH"
+  fi
+  # The config directory appears on first launch, so also look for the app itself.
+  if [[ "$(uname -s)" == "Darwin" ]] && [[ -d "$HOME/Library/Application Support/Claude" \
+      || -d "/Applications/Claude.app" || -d "$HOME/Applications/Claude.app" ]]; then
+    targets+=(claude_desktop)
+  else
+    echo "Skipped Claude Desktop: no macOS installation found"
+  fi
+fi
+if [[ ${#targets[@]} -eq 0 ]]; then
+  echo "No requested agent host is installed; nothing was registered" >&2
+  exit 1
+fi
+for target in "${targets[@]}"; do
+  "install_$target"
+done
 
 echo "Restart the agent host. In Claude Desktop, use a Local Code session for /branchforge."

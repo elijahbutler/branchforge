@@ -3,31 +3,56 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 
 class EventStore:
     def __init__(self, path: str | Path = "branchforge.db"):
         self.path = str(path)
-        self._lock = threading.Lock()
-        self._connection = sqlite3.connect(self.path, check_same_thread=False)
+        self._lock = threading.RLock()
+        self._depth = 0
+        # Autocommit mode: atomic() issues every BEGIN, COMMIT, and ROLLBACK itself.
+        self._connection = sqlite3.connect(self.path, check_same_thread=False, isolation_level=None)
         self._connection.row_factory = sqlite3.Row
         self._connection.execute("PRAGMA journal_mode=WAL")
-        self._connection.execute("""
-            CREATE TABLE IF NOT EXISTS events (
-                sequence INTEGER PRIMARY KEY AUTOINCREMENT,
-                run_id TEXT NOT NULL,
-                stage TEXT,
-                branch_id TEXT,
-                event_type TEXT NOT NULL,
-                payload TEXT NOT NULL,
-                created_at TEXT NOT NULL
-            )
-        """)
-        self._connection.execute("CREATE INDEX IF NOT EXISTS idx_events_run ON events(run_id, sequence)")
-        self._connection.commit()
+        if not self.query("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'events'"):
+            self.transaction([
+                ("""CREATE TABLE IF NOT EXISTS events (
+                    sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+                    run_id TEXT NOT NULL,
+                    stage TEXT,
+                    branch_id TEXT,
+                    event_type TEXT NOT NULL,
+                    payload TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                )""", ()),
+                ("CREATE INDEX IF NOT EXISTS idx_events_run ON events(run_id, sequence)", ()),
+            ])
+
+    @contextmanager
+    def atomic(self) -> Iterator[None]:
+        """Hold one write transaction across several reads and writes.
+
+        Nested blocks join the outermost transaction, which commits when it
+        exits cleanly and rolls back every write when an exception escapes.
+        """
+        with self._lock:
+            if self._depth == 0:
+                self._connection.execute("BEGIN IMMEDIATE")
+            self._depth += 1
+            try:
+                yield
+            except BaseException:
+                self._depth -= 1
+                if self._depth == 0:
+                    self._connection.execute("ROLLBACK")
+                raise
+            self._depth -= 1
+            if self._depth == 0:
+                self._connection.execute("COMMIT")
 
     def transaction(
         self,
@@ -35,16 +60,10 @@ class EventStore:
     ) -> list[int]:
         """Execute statements atomically and return their row IDs."""
         row_ids: list[int] = []
-        with self._lock:
-            try:
-                self._connection.execute("BEGIN IMMEDIATE")
-                for sql, parameters in statements:
-                    cursor = self._connection.execute(sql, parameters)
-                    row_ids.append(int(cursor.lastrowid or 0))
-                self._connection.commit()
-            except BaseException:
-                self._connection.rollback()
-                raise
+        with self.atomic():
+            for sql, parameters in statements:
+                cursor = self._connection.execute(sql, parameters)
+                row_ids.append(int(cursor.lastrowid or 0))
         return row_ids
 
     def query(self, sql: str, parameters: tuple[Any, ...] = ()) -> list[sqlite3.Row]:

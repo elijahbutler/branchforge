@@ -11,8 +11,8 @@
   "keywords": ["agents", "reasoning", "research", "branching", "mcp"],
   "mcpServers": {
     "branchforge": {
-      "command": "branchforge",
-      "args": ["mcp"]
+      "command": "uvx",
+      "args": ["--from", "${CLAUDE_PLUGIN_ROOT}[mcp]", "branchforge", "mcp"]
     }
   }
 }

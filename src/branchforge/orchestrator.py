@@ -6,7 +6,7 @@ from collections import Counter
 from dataclasses import asdict
 
 from .jsonutil import parse_json_object
-from .models import BranchResult, BranchStatus, Finding, Hypothesis, RunConfig, StageOutcome, StageSpec, new_id
+from .models import BranchResult, BranchStatus, Hypothesis, RunConfig, StageOutcome, StageSpec, new_id
 from .policy import BranchPolicy
 from .providers import ModelProvider
 from .repository import BranchRepository
@@ -49,12 +49,23 @@ class BranchForge:
             self.repository.render_run(run_id)
             return outcomes
         except Exception as exc:
-            self.repository.finish_run(run_id, error=str(exc))
-            self.repository.render_run(run_id)
+            # A failure after completion, such as a full disk while rendering, leaves
+            # the run completed; only a run still open is marked failed.
+            run = self.repository.get_run(run_id)
+            if run is not None and run["status"] == "running":
+                self.repository.finish_run(run_id, error=str(exc) or type(exc).__name__)
+                self.repository.render_run(run_id)
             raise
 
     async def _run_stage(self, run_id: str, goal: str, stage: StageSpec, context: str) -> StageOutcome:
         self.repository.create_stage(run_id, stage)
+        if stage.evidence_policy == "observed":
+            # Fail before spending model calls on branches that can never verify.
+            raise RuntimeError(
+                f"Stage {stage.name!r} requires observed checks, and the headless kernel cannot run or record "
+                "checks. Run it through the agent-native tools, or set evidence_policy to 'judged' to accept "
+                "model verification"
+            )
         survivors: list[BranchResult] = []
         for round_number in range(self.config.max_rounds):
             round_context = context
@@ -62,14 +73,19 @@ class BranchForge:
                 round_context += "\nSURVIVING CANDIDATES TO CHALLENGE OR IMPROVE:\n" + json.dumps([asdict(item) for item in survivors])
             hypotheses = await self._propose(goal, stage, round_context, round_number, survivors)
             admitted = self.policy.admit(hypotheses)
-            if len(admitted) < 2:
-                raise RuntimeError("Branch policy admitted fewer than two competing hypotheses")
+            competing = len(admitted) >= 2
             for item in hypotheses:
                 self.repository.create_branch(run_id, stage.name, item, stage.mode)
-                if item in admitted:
+                if competing and item in admitted:
                     self.repository.transition(run_id, item.id, BranchStatus.ADMITTED)
                 else:
                     self.repository.transition(run_id, item.id, BranchStatus.PRUNED, reason="Rejected by novelty or duplicate admission policy")
+            if not competing:
+                if not survivors:
+                    raise RuntimeError("Branch policy admitted fewer than two competing hypotheses")
+                # A later round with nothing new to test ends refinement; the survivors stand.
+                self.store.append(run_id, "ROUND_SKIPPED", {"round": round_number, "admitted": len(admitted)}, stage=stage.name)
+                break
             results = await asyncio.gather(*(self._explore_and_verify(run_id, goal, stage, round_context, item) for item in admitted))
             candidates = [*survivors, *results]
             survivors = self.policy.survivors(candidates)
@@ -86,18 +102,7 @@ class BranchForge:
             raise RuntimeError(f"Stage {stage.name!r} has no verified candidate to commit")
         winner, rationale, confidence = await self._final_judge(goal, stage, survivors, votes)
         outcome = StageOutcome(stage, winner, survivors, rationale, confidence, run_id)
-        for branch in self.repository.branches(run_id):
-            if branch["stage"] != stage.name or branch["branch_id"] == winner.hypothesis.id:
-                continue
-            if branch["status"] in {BranchStatus.EXPLORED.value, BranchStatus.VERIFIED.value}:
-                self.repository.transition(run_id, branch["branch_id"], BranchStatus.PRUNED, reason="Not selected at stage collapse")
-        self.repository.transition(run_id, winner.hypothesis.id, BranchStatus.COMMITTED)
-        self.repository.record_finding(run_id, Finding(
-            winner.hypothesis.id,
-            f"Committed for stage {stage.name}: {rationale}",
-            kind="decision",
-        ))
-        self.repository.finish_stage(run_id, stage.name, winner.hypothesis.id, rationale, confidence, dict(votes))
+        self.repository.commit_stage(run_id, stage.name, winner.hypothesis.id, rationale, confidence, dict(votes))
         self.repository.render_run(run_id)
         return outcome
 
@@ -150,14 +155,15 @@ CANDIDATE: {json.dumps(asdict(result))}
 Check invariants and score each rubric key from 0 to 1. Unsupported claims score poorly.
 Schema: {{"verified":bool,"scores":{{"criterion":0..1}},"notes":[str]}}"""
         data = parse_json_object(await self.judge_provider.complete(SYSTEM, prompt))
-        result.verified = bool(data.get("verified", False))
-        weights = stage.rubric
         raw_scores = data.get("scores", {})
-        result.scores = {key: float(raw_scores.get(key, 0)) * weight for key, weight in weights.items()}
-        notes = list(data.get("notes", []))
-        self.repository.record_verification(run_id, result, notes)
-        if result.verified:
-            self.repository.transition(run_id, result.hypothesis.id, BranchStatus.VERIFIED)
+        scores = {key: min(1.0, max(0.0, float(raw_scores.get(key, 0)))) for key in stage.rubric}
+        self.repository.verify_branch(
+            run_id, result.hypothesis.id, verified=bool(data.get("verified", False)),
+            scores=scores, notes=list(data.get("notes", [])),
+        )
+        branch = self.repository.get_branch(result.hypothesis.id) or {}
+        result.verified = branch.get("status") == BranchStatus.VERIFIED.value
+        result.scores = branch.get("scores", {})
 
     async def _pairwise_tournament(self, run_id: str, stage: StageSpec, candidates: list[BranchResult]) -> Counter[str]:
         votes: Counter[str] = Counter()
@@ -185,6 +191,6 @@ Choose a candidate ID. Schema: {{"winner_id":str,"confidence":0..1,"rationale":s
         data = parse_json_object(await self.judge_provider.complete(SYSTEM, prompt))
         requested = data.get("winner_id")
         winner = next((item for item in candidates if item.hypothesis.id == requested), None)
-        if winner is None:  # Also makes mock/local mode deterministic.
-            winner = max(candidates, key=lambda item: (votes[item.hypothesis.id], item.score, item.confidence))
+        if winner is None or not winner.verified:  # Also makes mock/local mode deterministic.
+            winner = max((item for item in candidates if item.verified), key=lambda item: (votes[item.hypothesis.id], item.score, item.confidence))
         return winner, str(data.get("rationale", "Highest verified candidate.")), float(data.get("confidence", winner.confidence))

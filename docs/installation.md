@@ -42,7 +42,20 @@ The installer:
 3. Installs the BranchForge skill suite.
 4. Registers the MCP server using the absolute `.venv/bin/branchforge` path.
 
+The installer registers every requested host it finds and skips the rest, so `--all` works with only one of Codex and Claude installed. It can be rerun without `--force`; use `--force` only to replace a skill of the same name that came from elsewhere.
+
 Restart the agent host or open a new task after installation.
+
+## Install As A Claude Code Plugin
+
+The repository is also a Claude Code plugin marketplace. The plugin starts the server with `uvx` from the plugin directory, so it needs [uv](https://docs.astral.sh/uv/) on PATH and nothing else:
+
+```bash
+claude plugin marketplace add elijahbutler/branchforge
+claude plugin install branchforge@branchforge
+```
+
+The Codex plugin under `plugins/branchforge` expects a `branchforge` command on PATH.
 
 ## Verify Installation
 
@@ -83,6 +96,8 @@ The configured command should end with:
 ```text
 .venv/bin/branchforge mcp
 ```
+
+The CLI lives in the checkout's `.venv`. Run it as `.venv/bin/branchforge`, or add that directory to PATH.
 
 ## Claude Desktop Notes
 

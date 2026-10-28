@@ -28,6 +28,14 @@ class BranchStatus(StrEnum):
     COMMITTED = "committed"
 
 
+EVIDENCE_POLICIES = ("observed", "judged")
+CHECK_KINDS = ("test", "benchmark", "static_analysis", "inspection", "source")
+EVIDENCE_KINDS = (
+    "observation", "test_result", "benchmark", "source", "artifact_inspection",
+    "analysis", "model_assertion",
+)
+
+
 @dataclass(slots=True)
 class StageSpec:
     name: str
@@ -43,6 +51,15 @@ class StageSpec:
             "novelty": 0.15,
         }
     )
+    # "observed" stages verify a branch only after a recorded check passes for
+    # every invariant; "judged" stages accept the verifier's judgment. Left
+    # unset, software stages are observed and the rest judged, whichever way
+    # the stage is built.
+    evidence_policy: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.evidence_policy is None:
+            self.evidence_policy = "observed" if self.mode == BranchMode.SOFTWARE else "judged"
 
 
 @dataclass(slots=True)
@@ -121,6 +138,22 @@ class Evidence:
     artifact_id: str | None = None
     observed: bool = False
     id: str = field(default_factory=lambda: new_id("evidence"))
+
+
+@dataclass(slots=True)
+class Check:
+    """One reported result: a command, measurement, or inspection that passed or failed."""
+
+    branch_id: str
+    name: str
+    passed: bool
+    kind: str = "test"
+    invariant: str | None = None
+    command: str | None = None
+    exit_code: int | None = None
+    artifact_id: str | None = None
+    details: str = ""
+    id: str = field(default_factory=lambda: new_id("check"))
 
 
 @dataclass(slots=True)

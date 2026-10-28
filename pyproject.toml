@@ -13,7 +13,7 @@ authors = [{name = "Elijah Butler"}]
 dependencies = []
 
 [project.optional-dependencies]
-mcp = ["mcp>=1.0,<2"]
+mcp = ["mcp>=1.16,<2"]
 
 [project.scripts]
 branchforge = "branchforge.cli:main"

@@ -24,6 +24,12 @@ BranchForge spends parallel model inference only at consequential, uncertain dec
 - Deterministic agent-native MCP server with lifecycle, evidence, artifact, and dossier tools
 - Codex and Claude skill suites with phase-specific orchestration instructions
 - Codex and Claude plugin manifests plus local installers
+- Lifecycle rules enforced in the repository for both modes: final runs, atomic stage commits, admission budgets
+- Observed checks that gate verification, with an `observed` evidence policy for software stages
+- `branchforge status` and MCP `run_status` (R1), `branchforge doctor` (R3, partial)
+- Typed MCP schemas with parameter descriptions, enums, read-only annotations, and compact responses
+- Versioned SQLite schema with migration from the first release
+- CI on Python 3.11 and 3.14, with and without the MCP SDK
 
 ## Prioritized roadmap
 
@@ -32,7 +38,7 @@ The core branch graph is durable; the product now needs to help users and host a
 understand what is unfinished, what is safe to do next, and why a run can or cannot
 finish.
 
-### R1 — Guided run UX
+### R1 — Guided run UX (shipped)
 
 - Add `branchforge status [run_id]` and MCP `run_status`.
 - Report active run, stage state, branch counts, unresolved branch IDs, blockers, next actions, and finish readiness.
@@ -47,7 +53,7 @@ finish.
 - Make negative verification produce clear resolution guidance so rejected candidates do not remain ambiguous.
 - Ensure failed partial-run dossiers do not leave active-looking branch records without explanation.
 
-### R3 — Install confidence
+### R3 — Install confidence (partly shipped)
 
 - Add `branchforge doctor --host local|codex|claude|claude-desktop`.
 - Diagnose Python/runtime import, MCP stdio startup, skill installation, host CLI availability, configured command path, duplicate Claude scopes, Desktop config shape, and marketplace/PATH readiness.
@@ -59,6 +65,17 @@ finish.
 - Score correctness, evidence quality, cost, latency, and calibrated uncertainty.
 - Add one deterministic coding evaluator first, using tests/static checks/artifact inspection.
 - Use evaluator results as structured evidence that cannot be overridden by a model judge when hard constraints fail.
+
+### Deferred from the lifecycle overhaul
+
+These were considered and left out. Each needs evidence or a decision first.
+
+- **Run checks inside BranchForge.** A `check_run` tool was built and then removed before merge. It executed commands from a user-owned file, and each review round still found a new way to widen what it could reach: the caller-supplied project directory, forgeable git worktree registrations, leaked child processes. A server that executes commands needs the M2 capability manifests and a sandbox first. Until then the host runs each check under its own permission prompts and reports the result with `check_record`.
+- **Collapse the seven skills into one with reference files.** Anthropic's skill guide favors one entry point with progressive disclosure. There are no evals to show the change helps, so build R4's evals first.
+- **Trim the tool list.** `branch_start` is optional and `run_view` overlaps `run_status`. Removing tools breaks installed skills; do it with the skill consolidation.
+- **Record who verified a branch.** The code cannot tell an explorer from an independent verifier. Needs a host-supplied agent identity.
+- **Rebuild state from events.** Not needed until runs must resume across machines.
+- **Codex plugin launch.** The Codex plugin still assumes `branchforge` is on PATH. Publishing to PyPI would let both plugins start the server with `uvx branchforge`.
 
 ## Deliberately out of scope for v0.1
 

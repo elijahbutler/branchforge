@@ -31,6 +31,10 @@ install_suite() {
   for source_dir in "$repo_root"/skills/branchforge "$repo_root"/skills/branchforge-* "$repo_root"/skills/branching-deliberation; do
     [[ -d "$source_dir" ]] || continue
     target="$target_root/$(basename "$source_dir")"
+    if [[ "$mode" == "link" && -L "$target" && "$(readlink "$target")" == "$source_dir" ]]; then
+      echo "Already installed $target"
+      continue
+    fi
     if [[ -e "$target" || -L "$target" ]]; then
       if [[ "$force" != "true" ]]; then
         echo "Refusing to replace existing skill: $target" >&2
